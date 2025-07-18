@@ -1,8 +1,69 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from core.file_api import FileApi
 from gui.pagination import PaginationWidget
 import os
+
+class BatchRenameWorker(QThread):
+    progress = pyqtSignal(int, int)  # 已完成，总数
+    finished = pyqtSignal(int, int)  # 成功，失败
+    def __init__(self, api, token, rename_list, batch_size=3, parent=None):
+        super().__init__(parent)
+        self.api = api
+        self.token = token
+        self.rename_list = rename_list
+        self.batch_size = batch_size
+        self._is_running = True
+    def run(self):
+        import time
+        total = len(self.rename_list)
+        success, fail = 0, 0
+        for i in range(0, total, self.batch_size):
+            if not self._is_running:
+                break
+            batch = self.rename_list[i:i+self.batch_size]
+            for item in batch:
+                if item['old_name'] == item['new_name']:
+                    continue
+                try:
+                    self.api.rename_file(self.token, item['file_id'], item['new_name'])
+                    success += 1
+                except Exception as e:
+                    fail += 1
+                self.progress.emit(success+fail, total)
+            time.sleep(0.6)
+        self.finished.emit(success, fail)
+    def stop(self):
+        self._is_running = False
+
+class ProgressDialog(QDialog):
+    def __init__(self, title, total, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(420, 180)
+        layout = QVBoxLayout(self)
+        self.label = QLabel("正在批量重命名...")
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, total)
+        self.progress.setValue(0)
+        self.progress.setFixedHeight(32)
+        layout.addWidget(self.progress)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.cancel_btn = QPushButton("取消")
+        self.cancel_btn.setFixedWidth(120)
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        self.cancel_btn.clicked.connect(self.reject)
+    def setValue(self, val):
+        self.progress.setValue(val)
+    def setLabelText(self, text):
+        self.label.setText(text)
+    def exec_(self):
+        return super().exec_()
 
 class FileListPage(QWidget):
     def __init__(self, get_token_func, parent=None):
@@ -39,6 +100,11 @@ class FileListPage(QWidget):
         self.rename_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
         self.rename_btn.clicked.connect(self.on_rename)
         func_layout.addWidget(self.rename_btn)
+        # 新增批量重命名按钮
+        self.batch_rename_btn = QPushButton('批量重命名')
+        self.batch_rename_btn.setStyleSheet('QPushButton{min-width:110px;max-width:140px;min-height:28px;max-height:32px;font-size:14px;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}')
+        self.batch_rename_btn.clicked.connect(self.on_batch_rename)
+        func_layout.addWidget(self.batch_rename_btn)
         self.delete_btn = QPushButton('删除')
         self.delete_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
         self.delete_btn.clicked.connect(self.on_delete)
@@ -68,6 +134,11 @@ class FileListPage(QWidget):
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_btn)
         search_layout.addWidget(self.refresh_btn)
+        # 新增全选按钮
+        self.select_all_btn = QPushButton("全选")
+        self.select_all_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
+        self.select_all_btn.clicked.connect(self.on_select_all)
+        search_layout.addWidget(self.select_all_btn)
         layout.addLayout(search_layout)
         # 文件表格
         layout.addSpacing(18)
@@ -149,6 +220,9 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         # layout.addWidget(self.pagination)
         self.info_label = QLabel("")
         self.info_label.setVisible(False)
+        self.info_label.setWordWrap(True)
+        self.info_label.setMaximumHeight(40)
+        self.info_label.setStyleSheet("color:#d9363e;font-size:14px;")
         layout.addWidget(self.info_label)
         self.setLayout(layout)
         self.load_file_list()
@@ -188,6 +262,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         token = self.get_token_func()
         if not token:
             self.info_label.setText("请先登录/选择用户")
+            self.info_label.setToolTip("")
             self.info_label.setVisible(True)
             return
         parent_id = parent_id if parent_id is not None else self.current_parent_id
@@ -195,13 +270,18 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         self.table.setRowCount(0)
         self.table.setDisabled(True)
         self.info_label.setText("加载中...")
+        self.info_label.setToolTip("")
         self.info_label.setVisible(True)
         def fetch():
             try:
                 resp = self.api.get_file_list(token, parent_file_id=parent_id, limit=page_size, search_data=search_data)
                 return resp
             except Exception as e:
-                return {"code": -1, "message": f"网络异常或服务器无响应: {e}"}
+                short_msg = "获取失败：网络异常或服务器无响应"
+                self.info_label.setText(short_msg)
+                self.info_label.setToolTip(str(e))
+                self.info_label.setVisible(True)
+                return {"code": -1, "message": short_msg}
         class Loader(QThread):
             finished = pyqtSignal(dict)
             def run(self):
@@ -259,7 +339,9 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         self.table.setRowCount(len(self.file_list))
         for row, f in enumerate(self.file_list):
             self.table.setItem(row, 0, QTableWidgetItem(str(f.get('fileId'))))
-            self.table.setItem(row, 1, QTableWidgetItem(f.get('filename', '')))
+            name_item = QTableWidgetItem(f.get('filename', ''))
+            name_item.setToolTip(f.get('filename', ''))  # 设置tooltip
+            self.table.setItem(row, 1, name_item)
             self.table.setItem(row, 2, QTableWidgetItem('文件夹' if f.get('type') == 1 else '文件'))
             self.table.setItem(row, 3, QTableWidgetItem(self.format_size(f.get('size', 0))))
             status = f.get('status', 0)
@@ -561,3 +643,44 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 copy_id_action.triggered.connect(do_copy)
                 menu.addAction(copy_id_action)
                 menu.exec_(self.table.viewport().mapToGlobal(pos)) 
+
+    def on_batch_rename(self):
+        from gui.batch_rename import BatchRenameDialog
+        from core.file_api import FileApi
+        from PyQt5.QtWidgets import QMessageBox, QApplication
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "提示", "请先选择要批量重命名的文件/文件夹")
+            return
+        file_infos = []
+        for idx in selected_rows:
+            row = idx.row()
+            file_id = self.table.item(row, 0).text()
+            file_name = self.table.item(row, 1).text()
+            file_infos.append({'file_id': file_id, 'file_name': file_name})
+        dlg = BatchRenameDialog(file_infos, self)
+        if dlg.exec_() == dlg.Accepted:
+            rename_list = dlg.get_rename_list()
+            token = self.get_token_func()
+            api = FileApi()
+            progress_dlg = ProgressDialog("批量重命名进度", len(rename_list), self)
+            worker = BatchRenameWorker(api, token, rename_list, batch_size=5)  # 并发数改为5
+            def on_progress(done, total):
+                progress_dlg.setValue(done)
+            def on_finished(success, fail):
+                progress_dlg.setValue(len(rename_list))
+                progress_dlg.setLabelText(f"完成，成功{success}个，失败{fail}个。")
+                QApplication.processEvents()
+                import time
+                time.sleep(1.2)
+                progress_dlg.accept()
+                QMessageBox.information(self, "批量重命名", f"重命名完成，成功{success}个，失败{fail}个。")
+                self.on_refresh()
+            worker.progress.connect(on_progress)
+            worker.finished.connect(on_finished)
+            progress_dlg.cancel_btn.clicked.connect(worker.stop)
+            worker.start()
+            progress_dlg.exec_()
+
+    def on_select_all(self):
+        self.table.selectAll() 

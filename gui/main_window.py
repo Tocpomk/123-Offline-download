@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon, QPixmap
 import base64
 import os
+import sys
 
 class ProgressQueryThread(QThread):
     """异步查询离线任务进度的线程"""
@@ -249,11 +250,14 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具")
+        self.setWindowTitle("123网盘离线下载工具1.0.2-beta")
         self.resize(1400, 900)
-        # 设置窗口图标
+        # 设置窗口图标，兼容打包和源码
         try:
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icon_date.ico')
+            if getattr(sys, 'frozen', False):
+                icon_path = os.path.join(sys._MEIPASS, 'icon_date.ico')
+            else:
+                icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icon_date.ico')
             if os.path.exists(icon_path):
                 icon = QIcon(icon_path)
                 self.setWindowIcon(icon)
