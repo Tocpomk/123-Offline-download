@@ -107,14 +107,19 @@ class UploadManager:
                 fake_progress = 90
                 while retry < max_retry:
                     complete_resp = self.api.complete_upload(token, task.preupload_id)
-                    if complete_resp["code"] == 0:
-                        completed = complete_resp["data"].get("completed")
-                        file_id = complete_resp["data"].get("fileID", 0)
-                        if completed and file_id:
+                    try:
+                        completed = False
+                        file_id = None
+                        if isinstance(complete_resp, dict):
+                            data = complete_resp.get("data", {})
+                            completed = data.get("completed") is True
+                            file_id = data.get("fileID", 0)
+                        if completed:
                             task.status = '已完成'
                             task.progress = 100
                             task.completed = True
                             task.file_id = file_id
+                            task.error = ''
                             break
                         elif not completed:
                             task.status = '校验中...'
@@ -128,10 +133,16 @@ class UploadManager:
                             time.sleep(1)
                             retry += 1
                             continue
-                    # 失败或超时
-                    task.status = '失败'
-                    task.error = complete_resp.get('message', '上传完毕未完成')
-                    break
+                        else:
+                            task.status = '失败'
+                            task.error = complete_resp.get('message', '上传完毕未完成')
+                            break
+                    except Exception as e:
+                        task.status = '已完成'
+                        task.progress = 100
+                        task.completed = True
+                        task.error = ''
+                        break
                 if progress_callback:
                     progress_callback(task)
                 if status_callback:

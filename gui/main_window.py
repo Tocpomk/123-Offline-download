@@ -618,11 +618,18 @@ QWidget {
                 wrapper.setGraphicsEffect(shadow)
                 # 删除任务按钮
                 self.delete_btn = QPushButton("删除任务")
-                self.delete_btn.setFixedSize(88, 32)
+                self.delete_btn.setFixedSize(44, 16)
                 self.delete_btn.setStyleSheet('QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:8px;font-size:15px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);} ')
                 self.delete_btn.clicked.connect(self.delete_selected_task)
+                # 新增清空按钮
+                self.clear_btn = QPushButton("清空任务")
+                self.clear_btn.setFixedSize(44, 16)
+                self.clear_btn.setStyleSheet('QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF7875,stop:1 #FF4D4F);color:#fff;border:none;border-radius:8px;font-size:13px;} QPushButton:hover{background:#FF4D4F;}')
+                self.clear_btn.clicked.connect(self.clear_all_tasks)
                 btn_layout = QHBoxLayout()
                 btn_layout.addWidget(self.delete_btn)
+                btn_layout.addSpacing(16)
+                btn_layout.addWidget(self.clear_btn)
                 btn_layout.addStretch()
                 btn_layout.setContentsMargins(8, 12, 8, 18)  # 上下左右留白，按钮不贴表格
                 wrapper_layout.addLayout(btn_layout)
@@ -631,6 +638,12 @@ QWidget {
                 layout.addWidget(wrapper)
                 self.setLayout(layout)
                 self.refresh_table()
+            def clear_all_tasks(self):
+                from PyQt5.QtWidgets import QMessageBox
+                reply = QMessageBox.question(self, "确认清空", "确定要清空所有上传任务吗？", QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.manager.tasks.clear()
+                    self.refresh_table()
             def refresh_table(self):
                 tasks = self.manager.tasks
                 self.table.setRowCount(len(tasks))

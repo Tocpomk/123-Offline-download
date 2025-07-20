@@ -78,29 +78,39 @@ class UploadDialog(QDialog):
                 QMessageBox.warning(self, "创建顶层目录失败", f"{self.top_folder_name}: {e}")
                 return
             dir_cache = {"": top_dir_id}  # 相对路径->网盘目录ID
+            # 先收集所有需要创建的目录（去重）
+            dir_set = set()
+            for _, rel_path, _ in self.selected_files:
+                rel_dir = os.path.dirname(rel_path)
+                if rel_dir:
+                    dir_set.add(rel_dir)
+            # 按目录层级排序，确保父目录先创建
+            dir_list = sorted(list(dir_set), key=lambda x: x.count(os.sep))
+            # 递归创建所有目录
+            for rel_dir in dir_list:
+                parts = rel_dir.split(os.sep) if rel_dir else []
+                cur_path = ""
+                cur_id = top_dir_id
+                for part in parts:
+                    if not part:
+                        continue
+                    cur_path = os.path.join(cur_path, part) if cur_path else part
+                    if cur_path not in dir_cache:
+                        try:
+                            new_id = file_api.create_directory(token, part, cur_id)
+                        except Exception as e:
+                            QMessageBox.warning(self, "创建目录失败", f"{cur_path}: {e}")
+                            return
+                        dir_cache[cur_path] = new_id
+                        cur_id = new_id
+                    else:
+                        cur_id = dir_cache[cur_path]
+                dir_cache[rel_dir] = cur_id
+            # 为每个文件分配正确的parent_id
             for abs_path, rel_path, _ in self.selected_files:
                 rel_dir = os.path.dirname(rel_path)
-                # 递归创建目录（即使是第一级目录也要创建）
-                if rel_dir not in dir_cache:
-                    parts = rel_dir.split(os.sep) if rel_dir else []
-                    cur_path = ""
-                    cur_id = top_dir_id
-                    for part in parts:
-                        if not part:
-                            continue
-                        cur_path = os.path.join(cur_path, part) if cur_path else part
-                        if cur_path not in dir_cache:
-                            try:
-                                new_id = file_api.create_directory(token, part, cur_id)
-                            except Exception as e:
-                                QMessageBox.warning(self, "创建目录失败", f"{cur_path}: {e}")
-                                return
-                            dir_cache[cur_path] = new_id
-                            cur_id = new_id
-                        else:
-                            cur_id = dir_cache[cur_path]
-                    dir_cache[rel_dir] = cur_id
-                self.manager.add_task(abs_path, dir_cache[rel_dir])
+                parent_dir_id = dir_cache[rel_dir] if rel_dir in dir_cache else top_dir_id
+                self.manager.add_task(abs_path, parent_dir_id)
         else:
             for file_path in self.selected_files:
                 self.manager.add_task(file_path, parent_id)
