@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar, QApplication, QScrollArea
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from core.file_api import FileApi
 from gui.pagination import PaginationWidget
@@ -75,6 +75,9 @@ class FileListPage(QWidget):
         self.folder_path = [(0, '根目录')]
         self.page_size = 100  # 直接最大100
         self.total = 0
+        # 排序相关
+        self.sort_column = 1  # 默认按文件名排序
+        self.sort_order = Qt.AscendingOrder  # 默认升序
         self.init_ui()
 
     def init_ui(self):
@@ -96,6 +99,11 @@ class FileListPage(QWidget):
         self.create_dir_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
         self.create_dir_btn.clicked.connect(self.on_create_dir)
         func_layout.addWidget(self.create_dir_btn)
+        # 新增上传文件按钮
+        self.upload_btn = QPushButton('上传文件')
+        self.upload_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}')
+        self.upload_btn.clicked.connect(self.on_upload_file)
+        func_layout.addWidget(self.upload_btn)
         self.rename_btn = QPushButton('重命名')
         self.rename_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
         self.rename_btn.clicked.connect(self.on_rename)
@@ -125,7 +133,10 @@ class FileListPage(QWidget):
         self.search_input.setPlaceholderText("搜索文件名/关键字")
         self.search_btn = QPushButton("搜索")
         self.search_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
-        self.search_btn.clicked.connect(self.on_search_or_clear)
+        self.search_btn.clicked.connect(self.on_search)
+        self.clear_btn = QPushButton("清空")
+        self.clear_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
+        self.clear_btn.clicked.connect(self.on_clear_search)
         self.refresh_btn = QPushButton("刷新")
         self.refresh_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
         self.refresh_btn.clicked.connect(self.on_refresh)
@@ -133,6 +144,7 @@ class FileListPage(QWidget):
         search_layout.addStretch()
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_btn)
+        search_layout.addWidget(self.clear_btn)
         search_layout.addWidget(self.refresh_btn)
         # 新增全选按钮
         self.select_all_btn = QPushButton("全选")
@@ -144,14 +156,39 @@ class FileListPage(QWidget):
         layout.addSpacing(18)
         from PyQt5.QtWidgets import QTableWidget
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["文件ID", "文件名", "类型", "大小", "状态", "回收站", "创建时间"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["文件ID", "文件名", "类型", "大小", "状态", "创建时间"])
+        
+        # 设置列宽模式
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        # 设置各列的固定宽度
+        self.table.setColumnWidth(0, 110)   # 文件ID
+        self.table.setColumnWidth(2, 110)   # 类型（稍微宽一点）
+        self.table.setColumnWidth(3, 120)  # 大小（稍微宽一点）
+        self.table.setColumnWidth(4, 110)   # 状态（稍微宽一点）
+        self.table.setColumnWidth(5, 180)  # 创建时间（稍微宽一点）
+        # 文件名列设置为拉伸模式，占用剩余空间
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 400)  # 设置文件名列最小宽度为400像素
+        
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         from PyQt5.QtWidgets import QAbstractItemView
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
+        
+        # 启用排序功能
+        self.table.setSortingEnabled(False)
+        self.table.horizontalHeader().setSectionsClickable(True)
+        self.table.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
+        
+        # 设置表头鼠标指针样式
+        from PyQt5.QtGui import QCursor
+        self.table.horizontalHeader().setCursor(QCursor(Qt.PointingHandCursor))
+        
+        # 保存原始表头文本
+        self.original_headers = ["文件ID", "文件名", "类型", "大小", "状态", "创建时间"]
+        
         self.table.setStyleSheet("""
 QTableWidget {
     border-radius: 10px;
@@ -172,6 +209,27 @@ QHeaderView::section {
     border-radius: 8px;
     height: 38px;
     padding: 4px 0;
+    padding-left: 12px;
+    text-align: left;
+}
+QHeaderView::section:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8BB8F5, stop:1 #D4E8FF);
+}
+QHeaderView::section:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #165DFF, stop:1 #0FC6C2);
+    color: white;
+}
+QHeaderView::up-arrow {
+    image: none;
+    border: none;
+    width: 0px;
+    height: 0px;
+}
+QHeaderView::down-arrow {
+    image: none;
+    border: none;
+    width: 0px;
+    height: 0px;
 }
 QTableWidget::item {
     border-radius: 6px;
@@ -202,6 +260,20 @@ QScrollBar::handle:vertical {
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
+}
+QScrollBar:horizontal {
+    height: 10px;
+    background: #f0f4f8;
+    margin: 0px 0px 0px 0px;
+    border-radius: 5px;
+}
+QScrollBar::handle:horizontal {
+    background: #A3C8F7;
+    min-width: 20px;
+    border-radius: 5px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
 }
 """)
         self.table.cellDoubleClicked.connect(self.on_cell_double_clicked)
@@ -309,11 +381,33 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             self.info_label.setText(f"获取失败: {resp.get('message')}")
             self.table.setRowCount(0)
             return
+        
         data = resp.get("data", {})
         all_files = [f for f in data.get("fileList", []) if f.get('trashed', 0) == 0]
-        self.total = len(all_files)
-        self.file_list = all_files
+        
+        # 验证文件数据完整性
+        valid_files = []
+        for file_info in all_files:
+            if isinstance(file_info, dict) and 'fileId' in file_info and 'filename' in file_info:
+                # 确保关键字段存在且有默认值
+                file_info.setdefault('type', 0)
+                file_info.setdefault('size', 0)
+                file_info.setdefault('status', 0)
+                file_info.setdefault('createAt', '')
+                valid_files.append(file_info)
+            else:
+                print(f"警告：跳过无效文件数据：{file_info}")
+        
+        if len(valid_files) != len(all_files):
+            print(f"警告：{len(all_files) - len(valid_files)} 个文件数据无效，已过滤")
+        
+        self.total = len(valid_files)
+        self.file_list = valid_files.copy()  # 使用copy确保数据独立
         self.current_parent_id = parent_id
+        # 每次加载新数据都重置排序状态，不自动排序
+        self.sort_column = 1  # 默认按文件名
+        self.sort_order = Qt.AscendingOrder
+        
         # 路径追踪
         if not self.folder_path or self.folder_path[-1][0] != parent_id:
             if parent_id == 0:
@@ -327,8 +421,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 if not folder_name:
                     folder_name = str(parent_id)
                 self.folder_path.append((parent_id, folder_name))
+        
         self.update_path_bar()
         self.refresh_table()
+        
         if self.total >= 100:
             self.info_label.setText("接口限制，无法显示全部文件，请到官方查看")
             self.info_label.setVisible(True)
@@ -336,56 +432,154 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             self.info_label.setVisible(False)
 
     def refresh_table(self):
+        """刷新表格显示"""
+        if not self.file_list:
+            self.table.setRowCount(0)
+            return
+            
+        # 验证数据完整性
+        valid_files = []
+        for i, file_info in enumerate(self.file_list):
+            if isinstance(file_info, dict) and 'fileId' in file_info and 'filename' in file_info:
+                # 确保所有必要字段都有默认值
+                file_info.setdefault('type', 0)
+                file_info.setdefault('size', 0)
+                file_info.setdefault('status', 0)
+                file_info.setdefault('createAt', '')
+                valid_files.append(file_info)
+            else:
+                print(f"警告：发现无效文件数据（第{i}个）：{file_info}")
+        
+        if len(valid_files) != len(self.file_list):
+            print(f"警告：{len(self.file_list) - len(valid_files)} 个文件数据无效，已过滤")
+            self.file_list = valid_files.copy()  # 使用copy确保数据独立
+        
         self.table.setRowCount(len(self.file_list))
-        for row, f in enumerate(self.file_list):
-            self.table.setItem(row, 0, QTableWidgetItem(str(f.get('fileId'))))
-            name_item = QTableWidgetItem(f.get('filename', ''))
-            name_item.setToolTip(f.get('filename', ''))  # 设置tooltip
-            self.table.setItem(row, 1, name_item)
-            self.table.setItem(row, 2, QTableWidgetItem('文件夹' if f.get('type') == 1 else '文件'))
-            self.table.setItem(row, 3, QTableWidgetItem(self.format_size(f.get('size', 0))))
-            status = f.get('status', 0)
-            self.table.setItem(row, 4, QTableWidgetItem('正常' if status < 100 else '审核驳回'))
-            self.table.setItem(row, 5, QTableWidgetItem('是' if f.get('trashed', 0) else '否'))
-            self.table.setItem(row, 6, QTableWidgetItem(f.get('createAt', '')))
+        for row, file_info in enumerate(self.file_list):
+            try:
+                # 文件ID
+                file_id = str(file_info.get('fileId', ''))
+                id_item = QTableWidgetItem(file_id)
+                id_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 0, id_item)
+                
+                # 文件名
+                filename = file_info.get('filename', '')
+                filename_item = QTableWidgetItem(filename)
+                filename_item.setToolTip(filename)  # 设置tooltip，显示完整文件名
+                # 为排序设置数据
+                filename_item.setData(Qt.UserRole, filename.lower())
+                self.table.setItem(row, 1, filename_item)
+                
+                # 类型
+                file_type = "文件夹" if file_info.get('type') == 1 else "文件"
+                type_item = QTableWidgetItem(file_type)
+                type_item.setData(Qt.UserRole, file_info.get('type', 0))
+                type_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 2, type_item)
+                
+                # 大小
+                size = file_info.get('size', 0)
+                size_str = self.format_size(size)
+                size_item = QTableWidgetItem(size_str)
+                size_item.setData(Qt.UserRole, size)  # 用于排序的原始大小
+                size_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 3, size_item)
+                
+                # 状态
+                status = file_info.get('status', 0)
+                status_text = '正常' if status < 100 else '审核驳回'
+                status_item = QTableWidgetItem(status_text)
+                status_item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row, 4, status_item)
+                
+                # 创建时间
+                create_time = file_info.get('createAt', '')
+                create_time_item = QTableWidgetItem(create_time)
+                create_time_item.setData(Qt.UserRole, create_time)  # 用于排序的时间
+                self.table.setItem(row, 5, create_time_item)
+                
+            except Exception as e:
+                print(f"警告：处理第 {row} 行数据时出错：{e}")
+                print(f"问题数据：{file_info}")
+                # 填充空数据
+                for col in range(6):
+                    self.table.setItem(row, col, QTableWidgetItem(""))
+        
+        # 应用当前排序（如果有排序状态）
+        if hasattr(self, 'sort_column') and hasattr(self, 'sort_order'):
+            self.apply_current_sort()
+            # 更新排序状态指示器
+            self.update_sort_indicator()
 
-    def format_size(self, size):
-        if not size:
-            return '-'
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size < 1024:
-                return f"{size:.2f} {unit}"
-            size /= 1024
-        return f"{size:.2f} PB"
-
-    def on_search_or_clear(self):
-        if self.search_btn.text() == "搜索":
-            keyword = self.search_input.text().strip()
-            if keyword:
-                self.load_file_list(search_data=keyword)
-                self.search_btn.setText("清空")
+    def on_header_clicked(self, logical_index):
+        """处理表格头部点击事件"""
+        self.restore_header_texts()
+        if logical_index == self.sort_column:
+            self.sort_order = Qt.DescendingOrder if self.sort_order == Qt.AscendingOrder else Qt.AscendingOrder
         else:
-            self.search_input.clear()
-            self.load_file_list()
-            self.search_btn.setText("搜索")
+            self.sort_column = logical_index
+            self.sort_order = Qt.AscendingOrder
+        # 只对当前file_list排序
+        self.sort_file_list()
+        self.refresh_table()
 
-    def on_refresh(self):
-        self.load_file_list()
+    def restore_header_texts(self):
+        """恢复所有表头文本为原始状态"""
+        for i, header_text in enumerate(self.original_headers):
+            if i < self.table.columnCount():
+                self.table.horizontalHeaderItem(i).setText(header_text)
 
-    def on_prev_page(self):
-        pass  # 移除
-    def on_next_page(self):
-        pass  # 移除
-    def on_page_changed(self, page, page_size):
-        pass  # 移除
+    def sort_file_list(self):
+        """对文件列表进行排序，文件夹始终排在前面"""
+        if not self.file_list:
+            return
+        original_files = self.file_list.copy()
+        reverse = (self.sort_order == Qt.DescendingOrder)
+        try:
+            if not all(isinstance(f, dict) and 'fileId' in f and 'filename' in f for f in self.file_list):
+                print("警告：排序前数据验证失败，跳过排序")
+                return
+            # 文件夹优先，再按选中列排序
+            if self.sort_column == 1:  # 文件名
+                self.file_list.sort(key=lambda x: (x.get('type', 0) != 1, x.get('filename', '').lower()), reverse=reverse)
+            elif self.sort_column == 2:  # 类型
+                self.file_list.sort(key=lambda x: (x.get('type', 0) != 1, x.get('type', 0)), reverse=reverse)
+            elif self.sort_column == 3:  # 大小
+                self.file_list.sort(key=lambda x: (x.get('type', 0) != 1, x.get('size', 0)), reverse=reverse)
+            elif self.sort_column == 5:  # 创建时间
+                self.file_list.sort(key=lambda x: (x.get('type', 0) != 1, x.get('createAt', '')), reverse=reverse)
+            # 其他列保持原有顺序
+            if len(self.file_list) != len(original_files):
+                self.file_list = original_files
+                print("警告：排序过程中数据丢失，已恢复原始数据")
+                return
+            for i, file_info in enumerate(self.file_list):
+                if not isinstance(file_info, dict) or 'fileId' not in file_info:
+                    print(f"警告：排序后第 {i} 个文件数据无效，恢复原始数据")
+                    self.file_list = original_files
+                    return
+        except Exception as e:
+            self.file_list = original_files
+            print(f"排序出错：{e}，已恢复原始数据")
+
+    def apply_current_sort(self):
+        # 禁用QTableWidget的sortItems，保持表格和file_list顺序一致
+        pass
+
+    def get_file_by_row(self, row):
+        # 通过表格行号获取fileId，再反查file_list
+        file_id = self.table.item(row, 0).text()
+        for f in self.file_list:
+            if str(f.get('fileId')) == file_id:
+                return f
+        return None
 
     def on_cell_double_clicked(self, row, col):
-        # 双击文件夹进入
-        if self.file_list and 0 <= row < len(self.file_list):
-            f = self.file_list[row]
-            if f.get('type') == 1:  # 文件夹
-                self.folder_path.append((f.get('fileId'), f.get('filename', str(f.get('fileId')))))
-                self.load_file_list(parent_id=f.get('fileId')) 
+        f = self.get_file_by_row(row)
+        if f and f.get('type') == 1:  # 文件夹
+            self.folder_path.append((f.get('fileId'), f.get('filename', str(f.get('fileId')))))
+            self.load_file_list(parent_id=f.get('fileId'))
 
     def on_create_dir(self):
         from PyQt5.QtWidgets import QInputDialog, QMessageBox
@@ -407,7 +601,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 QMessageBox.critical(self, "错误", f"创建目录失败: {e}") 
 
     def on_rename(self):
-        from PyQt5.QtWidgets import QInputDialog, QMessageBox, QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QScrollArea, QWidget
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
         selected = self.table.selectedItems()
         if not selected:
             QMessageBox.warning(self, "提示", "请先选择要重命名的文件/文件夹")
@@ -415,8 +609,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         selected_rows = list(set([item.row() for item in selected]))
         if len(selected_rows) == 1:
             row = selected_rows[0]
-            file_id = int(self.table.item(row, 0).text())
-            old_name = self.table.item(row, 1).text()
+            f = self.get_file_by_row(row)
+            if not f:
+                QMessageBox.warning(self, "提示", "未找到对应文件")
+                return
+            file_id = f.get('fileId')
+            old_name = f.get('filename', '')
             new_name, ok = QInputDialog.getText(self, "重命名", f"请输入新名称：", text=old_name)
             if ok and new_name.strip() and new_name.strip() != old_name:
                 token = self.get_token_func()
@@ -478,19 +676,26 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             dlg = BatchRenameDialog(file_infos, self)
             if dlg.exec_() == QDialog.Accepted:
                 rename_list = dlg.get_rename_list()
-                if not rename_list:
-                    QMessageBox.information(self, "提示", "没有需要重命名的文件")
-                    return
                 token = self.get_token_func()
-                if not token:
-                    QMessageBox.warning(self, "提示", "请先登录/选择用户")
-                    return
-                try:
-                    self.api.batch_rename_files(token, rename_list)
-                    QMessageBox.information(self, "成功", f"批量重命名成功！")
-                    self.load_file_list()
-                except Exception as e:
-                    QMessageBox.critical(self, "错误", f"批量重命名失败: {e}") 
+                api = FileApi()
+                progress_dlg = ProgressDialog("批量重命名进度", len(rename_list), self)
+                worker = BatchRenameWorker(api, token, rename_list, batch_size=5)  # 并发数改为5
+                def on_progress(done, total):
+                    progress_dlg.setValue(done)
+                def on_finished(success, fail):
+                    progress_dlg.setValue(len(rename_list))
+                    progress_dlg.setLabelText(f"完成，成功{success}个，失败{fail}个。")
+                    QApplication.processEvents()
+                    import time
+                    time.sleep(1.2)
+                    progress_dlg.accept()
+                    QMessageBox.information(self, "批量重命名", f"重命名完成，成功{success}个，失败{fail}个。")
+                    self.on_refresh()
+                worker.progress.connect(on_progress)
+                worker.finished.connect(on_finished)
+                progress_dlg.cancel_btn.clicked.connect(worker.stop)
+                worker.start()
+                progress_dlg.exec_()
 
     def on_delete(self):
         from PyQt5.QtWidgets import QMessageBox
@@ -499,10 +704,14 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             QMessageBox.warning(self, "提示", "请先选择要删除的文件/文件夹")
             return
         selected_rows = list(set([item.row() for item in selected]))
-        if len(selected_rows) > 100:
-            QMessageBox.warning(self, "提示", "一次最多删除100个文件/文件夹！")
+        file_ids = []
+        for row in selected_rows:
+            f = self.get_file_by_row(row)
+            if f:
+                file_ids.append(f.get('fileId'))
+        if not file_ids:
+            QMessageBox.warning(self, "提示", "未找到要删除的文件")
             return
-        file_ids = [int(self.table.item(row, 0).text()) for row in selected_rows]
         reply = QMessageBox.question(self, "确认删除", f"确定要删除选中的 {len(file_ids)} 个文件/文件夹吗？\n删除后可在回收站找回。", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             token = self.get_token_func()
@@ -523,10 +732,14 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             QMessageBox.warning(self, "提示", "请先选择要移动的文件/文件夹")
             return
         selected_rows = list(set([item.row() for item in selected]))
-        if len(selected_rows) > 100:
-            QMessageBox.warning(self, "提示", "一次最多移动100个文件/文件夹！")
+        file_ids = []
+        for row in selected_rows:
+            f = self.get_file_by_row(row)
+            if f:
+                file_ids.append(f.get('fileId'))
+        if not file_ids:
+            QMessageBox.warning(self, "提示", "未找到要移动的文件")
             return
-        file_ids = [int(self.table.item(row, 0).text()) for row in selected_rows]
         # 自定义QInputDialog，设置QLineEdit右键菜单为中文
         class ChineseInputDialog(QInputDialog):
             def __init__(self, *args, **kwargs):
@@ -580,7 +793,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 QMessageBox.critical(self, "错误", f"移动失败: {e}") 
 
     def on_download(self):
-        from PyQt5.QtWidgets import QMessageBox, QApplication, QFileDialog
+        from PyQt5.QtWidgets import QMessageBox, QFileDialog
         from gui.main_window import MainWindow
         selected = self.table.selectedItems()
         if not selected:
@@ -591,8 +804,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
             QMessageBox.warning(self, "提示", "请只选择一个文件进行下载")
             return
         row = selected_rows[0]
-        file_id = int(self.table.item(row, 0).text())
-        file_name = self.table.item(row, 1).text()
+        f = self.get_file_by_row(row)
+        if not f:
+            QMessageBox.warning(self, "提示", "未找到对应文件")
+            return
+        file_id = f.get('fileId')
+        file_name = f.get('filename', '')
         token = self.get_token_func()
         if not token:
             QMessageBox.warning(self, "提示", "请先登录/选择用户")
@@ -684,3 +901,89 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
     def on_select_all(self):
         self.table.selectAll() 
+
+    def update_sort_indicator(self):
+        """更新排序状态指示器"""
+        # 清除所有列的排序指示器
+        for i in range(self.table.columnCount()):
+            self.table.horizontalHeader().setSortIndicatorShown(False)
+        
+        # 自定义排序指示器：在表头文本右边添加箭头
+        if self.file_list:
+            # 获取当前排序列的原始标题
+            header_text = self.original_headers[self.sort_column]
+            
+            # 根据排序方向选择箭头符号
+            if self.sort_order == Qt.AscendingOrder:
+                arrow = " ▲"  # 升序箭头，前面加空格
+            else:
+                arrow = " ▼"  # 降序箭头，前面加空格
+            
+            # 更新表头文本，在右边添加箭头
+            new_header_text = header_text + arrow
+            self.table.horizontalHeaderItem(self.sort_column).setText(new_header_text)
+            
+            # 设置排序列的背景色
+            self.table.horizontalHeader().setStyleSheet("""
+                QHeaderView::section {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #A3C8F7, stop:1 #e6f7ff);
+                    color: #222;
+                    font-weight: bold;
+                    font-size: 16px;
+                    border: none;
+                    border-radius: 8px;
+                    height: 38px;
+                    padding: 4px 0;
+                    padding-left: 12px;
+                    text-align: left;
+                }
+                QHeaderView::section:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8BB8F5, stop:1 #D4E8FF);
+                }
+                QHeaderView::section:nth-child(%d) {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #165DFF, stop:1 #0FC6C2);
+                    color: white;
+                }
+                QHeaderView::up-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                    height: 0px;
+                }
+                QHeaderView::down-arrow {
+                    image: none;
+                    border: none;
+                    width: 0px;
+                    height: 0px;
+                }
+            """ % (self.sort_column + 1)) 
+
+    def on_search(self):
+        search_text = self.search_input.text().strip()
+        self.load_file_list(search_data=search_text)
+
+    def on_clear_search(self):
+        self.search_input.clear()
+        self.load_file_list() 
+
+    def on_refresh(self):
+        self.load_file_list() 
+
+    def format_size(self, size):
+        if not size:
+            return '-'
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024:
+                return f"{size:.2f} {unit}"
+            size /= 1024
+        return f"{size:.2f} PB" 
+
+    def on_upload_file(self):
+        from gui.upload_dialog import UploadDialog
+        # 找到主窗口
+        main_win = self.parent()
+        while main_win and not hasattr(main_win, 'upload_manager'):
+            main_win = main_win.parent()
+        upload_manager = main_win.upload_manager if main_win else None
+        dlg = UploadDialog(self, upload_manager)
+        dlg.exec_() 

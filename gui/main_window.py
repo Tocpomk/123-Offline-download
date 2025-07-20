@@ -2,9 +2,9 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit,
     QPushButton, QCheckBox, QMessageBox, QSpinBox, QFormLayout, QSplitter, QListWidget, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QDialog, QSizePolicy
+    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QDialog, QSizePolicy, QProgressBar, QWidget, QHBoxLayout, QAbstractItemView
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from core.api import Pan123Api
 from core.storage import TokenStorage
 from core.user import UserManager
@@ -16,11 +16,14 @@ from PyQt5.QtGui import QIcon, QPixmap
 import base64
 import os
 import sys
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+from PyQt5.QtGui import QColor
 
 class ProgressQueryThread(QThread):
     """异步查询离线任务进度的线程"""
     progress_updated = pyqtSignal(list)  # 发送更新后的任务列表
     error_occurred = pyqtSignal(str)     # 发送错误信息
+    round_completed = pyqtSignal(int)    # 发送轮次完成信号
     
     def __init__(self, tasks, token, api):
         super().__init__()
@@ -28,16 +31,58 @@ class ProgressQueryThread(QThread):
         self.token = token
         self.api = api
         self.is_running = True
+        self.current_round = 1  # 当前轮次
+        self.max_tasks_per_batch = 3  # 每批最多查询3个任务
+        self.first_round_interval = 500  # 第一轮间隔0.5秒
+        self.subsequent_round_interval = 1000  # 后续轮次间隔1秒
     
     def run(self):
         try:
-            updated_tasks = []
-            for i, task in enumerate(self.tasks):
+            # 第一轮：查询所有任务
+            self.query_round(self.tasks, is_first_round=True)
+            self.round_completed.emit(self.current_round)
+            
+            # 后续轮次：只查询进行中的任务
+            while self.is_running:
+                self.current_round += 1
+                self.msleep(self.subsequent_round_interval)
+                
                 if not self.is_running:
                     break
-                    
-                progress = 0
-                status = "-"
+                
+                # 筛选进行中的任务
+                active_tasks = [task for task in self.tasks if task.status == "进行中"]
+                
+                if not active_tasks:
+                    # 没有进行中的任务，查询所有任务（可能有新任务或状态变化）
+                    active_tasks = [task for task in self.tasks if task.status not in ["成功", "失败"]]
+                
+                if not active_tasks:
+                    # 所有任务都完成了，停止查询
+                    break
+                
+                self.query_round(active_tasks, is_first_round=False)
+                self.round_completed.emit(self.current_round)
+                
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+    
+    def query_round(self, tasks_to_query, is_first_round=False):
+        """查询一轮任务进度"""
+        interval = self.first_round_interval if is_first_round else 100  # 第一轮间隔0.5秒，后续轮次间隔0.1秒
+        
+        for i in range(0, len(tasks_to_query), self.max_tasks_per_batch):
+            if not self.is_running:
+                break
+            
+            # 获取当前批次的任务
+            batch_tasks = tasks_to_query[i:i + self.max_tasks_per_batch]
+            
+            # 查询当前批次
+            for task in batch_tasks:
+                if not self.is_running:
+                    break
+                
                 if self.token and task.task_id:
                     try:
                         resp = self.api.check_download_progress(self.token, task.task_id)
@@ -45,27 +90,19 @@ class ProgressQueryThread(QThread):
                             progress = int(resp['data'].get('process', 0))
                             st = resp['data'].get('status', 0)
                             status = {0: "进行中", 1: "失败", 2: "成功", 3: "重试中"}.get(st, str(st))
-                            # 更新到task对象
+                            
+                            # 更新任务状态
                             task.progress = progress
                             task.status = status
                     except Exception as e:
-                        progress = 0
-                        status = "查询失败"
-                        task.status = status
-                
-                updated_tasks.append(task)
-                
-                # 每查询3个任务就发送一次更新信号，避免界面卡死
-                if (i + 1) % 3 == 0:
-                    self.progress_updated.emit(updated_tasks.copy())
-                    # 添加小延迟，避免API请求过于频繁
-                    self.msleep(100)
+                        task.status = "查询失败"
             
-            # 发送最终结果
-            self.progress_updated.emit(updated_tasks)
+            # 发送当前批次更新
+            self.progress_updated.emit(self.tasks.copy())
             
-        except Exception as e:
-            self.error_occurred.emit(str(e))
+            # 批次间延迟
+            if i + self.max_tasks_per_batch < len(tasks_to_query):
+                self.msleep(interval)
     
     def stop(self):
         self.is_running = False
@@ -192,30 +229,29 @@ class MainWindow(QMainWindow):
             # 操作栏按钮组优化，垂直居中
             op_widget = QWidget()
             op_layout = QHBoxLayout()
-            op_layout.setContentsMargins(0, 0, 0, 0)
-            op_layout.setSpacing(8)
-            op_layout.setAlignment(Qt.AlignHCenter)
-            btn_edit = QPushButton("编辑")
-            btn_edit.setFixedSize(38, 32)
-            btn_edit.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:6px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
-            btn_del = QPushButton("删除")
-            btn_del.setFixedSize(38, 32)
-            btn_del.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:6px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);}")
-            btn_update = QPushButton("更新")
-            btn_update.setFixedSize(38, 32)
-            btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:6px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
-            op_layout.addWidget(btn_edit)
-            op_layout.addWidget(btn_del)
-            op_layout.addWidget(btn_update)
+            op_layout.setContentsMargins(0, 10, 0, 10)  # 上下各留10像素
             outer_layout = QVBoxLayout()
-            outer_layout.setContentsMargins(0, 0, 0, 0)
+            outer_layout.setContentsMargins(0, 10, 0, 10)  # 上下各留10像素
             outer_layout.addStretch()
             outer_layout.addLayout(op_layout)
             outer_layout.addStretch()
             op_widget.setLayout(outer_layout)
-            op_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            op_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+            op_widget.setMinimumHeight(60)
             self.user_table.setCellWidget(row, 3, op_widget)
             self.user_table.setRowHeight(row, 90)
+            btn_edit = QPushButton("编辑")
+            btn_edit.setFixedSize(56, 36)
+            btn_edit.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
+            btn_del = QPushButton("删除")
+            btn_del.setFixedSize(56, 36)
+            btn_del.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);}")
+            btn_update = QPushButton("更新")
+            btn_update.setFixedSize(56, 36)
+            btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
+            op_layout.addWidget(btn_edit)
+            op_layout.addWidget(btn_del)
+            op_layout.addWidget(btn_update)
             btn_edit.clicked.connect(lambda _, n=name: self.edit_user_dialog(n))
             btn_del.clicked.connect(lambda _, n=name: self.delete_user(n))
             btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
@@ -250,7 +286,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.0.2-beta")
+        self.setWindowTitle("123网盘离线下载工具1.0.3-beta")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -368,6 +404,7 @@ class MainWindow(QMainWindow):
         self.nav_list.addItem(QListWidgetItem("离线进度"))
         self.nav_list.addItem(QListWidgetItem("文件管理"))
         self.nav_list.addItem(QListWidgetItem("下载任务"))
+        self.nav_list.addItem(QListWidgetItem("上传任务"))
         self.splitter.addWidget(self.nav_list)
 
         # 右侧内容区（QStackedWidget）
@@ -467,11 +504,18 @@ class MainWindow(QMainWindow):
         # 任务结果页（改为离线进度页）
         self.progress_tab = QWidget()
         progress_layout = QVBoxLayout()
+        
+        # 顶部按钮和状态栏
+        top_layout = QHBoxLayout()
         # 新增清空按钮
         clear_progress_btn = QPushButton("清空")
         clear_progress_btn.setStyleSheet('QPushButton{min-width:60px;max-width:90px;min-height:26px;max-height:32px;font-size:14px;background:#FF7875;color:#fff;border-radius:8px;} QPushButton:hover{background:#FF4D4F;}')
         clear_progress_btn.clicked.connect(self.on_clear_progress_tasks)
-        progress_layout.addWidget(clear_progress_btn, alignment=Qt.AlignRight)
+        top_layout.addWidget(clear_progress_btn)
+        
+        top_layout.addStretch()
+        
+        progress_layout.addLayout(top_layout)
         self.progress_table = QTableWidget()
         self.progress_table.setColumnCount(4)
         self.progress_table.setHorizontalHeaderLabels(["任务ID", "文件名", "进度", "状态"])
@@ -479,8 +523,38 @@ class MainWindow(QMainWindow):
         self.progress_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.progress_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.progress_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.progress_table.setStyleSheet("QTableWidget{font-size:16px;} QTableWidget::item:selected{background:#e6f7ff;color:#165DFF;} QHeaderView::section{background:#A3C8F7;color:#222;font-weight:bold;font-size:17px;border:none;height:40px;}")
-        self.progress_table.verticalHeader().setDefaultSectionSize(38)
+        self.progress_table.setStyleSheet("""
+QTableWidget {
+    border-radius: 12px;
+    border: 1.5px solid #d0d7de;
+    background: #fafdff;
+    font-size: 18px;
+    gridline-color: #e0e0e0;
+}
+QTableWidget::item {
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 2px;
+}
+QTableWidget::item:selected {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e6f7ff, stop:1 #cce7ff);
+    color: #165DFF;
+    border: 1.5px solid #165DFF;
+}
+QTableWidget::item:hover {
+    background: #f0faff;
+}
+QHeaderView::section {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #A3C8F7, stop:1 #e6f7ff);
+    color: #222;
+    font-weight: bold;
+    font-size: 20px;
+    border: none;
+    height: 44px;
+    border-radius: 10px;
+}
+""")
+        self.progress_table.verticalHeader().setDefaultSectionSize(54)
         progress_layout.addWidget(self.progress_table)
         self.progress_tab.setLayout(progress_layout)
         self.stack.addWidget(self.progress_tab)
@@ -497,6 +571,172 @@ class MainWindow(QMainWindow):
         # 下载任务页
         self.download_task_widget = DownloadTaskWidget(self.download_task_manager, self)
         self.stack.addWidget(self.download_task_widget)
+        # 上传任务页
+        from gui.upload_manager import UploadManager
+        class UploadTaskWidget(QWidget):
+            def __init__(self, manager, parent=None):
+                super().__init__(parent)
+                self.manager = manager
+                self.init_ui()
+            def init_ui(self):
+                layout = QVBoxLayout(self)
+                self.table = QTableWidget()
+                self.table.setColumnCount(5)
+                self.table.setHorizontalHeaderLabels(["文件名", "目录ID", "进度", "状态", "错误信息"])
+                self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+                self.table.verticalHeader().setDefaultSectionSize(36)
+                # 美化表头
+                self.table.setStyleSheet('''
+QTableWidget::item { font-size:15px; }
+QHeaderView::section {
+    background: qlineargradient(x1:0, y1:0,x2:1,y2:0,stop:0 #A3C8F7,stop:1 #e6f7ff);
+    color: #222;
+    font-weight: bold;
+    font-size: 17px;
+    border: none;
+    height: 38px;
+    border-radius: 8px;
+}
+''')
+                # 上传任务美化外壳
+                wrapper = QWidget()
+                wrapper_layout = QVBoxLayout(wrapper)
+                wrapper_layout.setContentsMargins(0, 0, 0, 0)
+                wrapper_layout.setSpacing(0)
+                wrapper.setStyleSheet('''
+QWidget {
+    background: #fafdff;
+    border-radius: 18px;
+    border: 1.5px solid #e6f0fa;
+}
+''')
+                # 添加阴影效果
+                shadow = QGraphicsDropShadowEffect()
+                shadow.setBlurRadius(24)
+                shadow.setOffset(0, 4)
+                shadow.setColor(QColor(22, 93, 255, 40))  # 半透明蓝色
+                wrapper.setGraphicsEffect(shadow)
+                # 删除任务按钮
+                self.delete_btn = QPushButton("删除任务")
+                self.delete_btn.setFixedSize(88, 32)
+                self.delete_btn.setStyleSheet('QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:8px;font-size:15px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);} ')
+                self.delete_btn.clicked.connect(self.delete_selected_task)
+                btn_layout = QHBoxLayout()
+                btn_layout.addWidget(self.delete_btn)
+                btn_layout.addStretch()
+                btn_layout.setContentsMargins(8, 12, 8, 18)  # 上下左右留白，按钮不贴表格
+                wrapper_layout.addLayout(btn_layout)
+                wrapper_layout.addSpacing(6)
+                wrapper_layout.addWidget(self.table)
+                layout.addWidget(wrapper)
+                self.setLayout(layout)
+                self.refresh_table()
+            def refresh_table(self):
+                tasks = self.manager.tasks
+                self.table.setRowCount(len(tasks))
+                self.table.setStyleSheet('''
+QTableWidget {
+    border-radius: 14px;
+    background: #fafdff;
+    border: none;
+    font-size: 15px;
+    selection-background-color: #e6f7ff;
+    selection-color: #222;
+}
+QTableWidget::item:selected {
+    background: #e6f7ff;
+    color: #165DFF;
+}
+QTableWidget::item:hover {
+    background: #f0f4fa;
+}
+QHeaderView::section {
+    background: qlineargradient(x1:0, y1:0,x2:1,y2:0,stop:0 #A3C8F7,stop:1 #e6f7ff);
+    color: #222;
+    font-weight: bold;
+    font-size: 17px;
+    border: none;
+    height: 38px;
+    border-radius: 8px;
+}
+''')
+                for row, t in enumerate(tasks):
+                    self.table.setItem(row, 0, QTableWidgetItem(os.path.basename(t.file_path)))
+                    self.table.setItem(row, 1, QTableWidgetItem(str(t.parent_id)))
+                    # 进度条美化
+                    bar = QProgressBar()
+                    bar.setValue(int(t.progress))
+                    bar.setFormat(f"{t.progress:.1f}%")
+                    bar.setAlignment(Qt.AlignCenter)
+                    bar.setFixedHeight(32)
+                    bar.setStyleSheet('''
+QProgressBar {
+    border: 2px solid #e0e6ed;
+    border-radius: 16px;
+    background: #fff;
+    height: 32px;
+    font-weight: bold;
+    font-size: 18px;
+    color: #222;
+    text-align: center;
+}
+QProgressBar::chunk {
+    border-radius: 16px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #13C2C2, stop:1 #165DFF);
+    margin: 2px;
+    min-width: 24px;
+}
+''')
+                    self.table.setCellWidget(row, 2, bar)
+                    status_item = QTableWidgetItem(t.status)
+                    if t.status == '已完成':
+                        status_item.setForeground(Qt.green)
+                    elif t.status == '失败':
+                        status_item.setForeground(Qt.red)
+                    else:
+                        status_item.setForeground(Qt.darkBlue)
+                    self.table.setItem(row, 3, status_item)
+                    error_item = QTableWidgetItem(t.error or "")
+                    if t.error:
+                        error_item.setForeground(Qt.red)
+                    self.table.setItem(row, 4, error_item)
+                # 自动上传所有待上传任务
+                self.auto_start_uploads()
+            def update_progress(self, task):
+                QTimer.singleShot(0, self.refresh_table)
+            def update_status(self, task):
+                QTimer.singleShot(0, self.refresh_table)
+            def auto_start_uploads(self):
+                # 只在有待上传任务时校验token
+                has_pending = any(task.status == '待上传' for task in self.manager.tasks)
+                if not has_pending:
+                    return
+                main_win = self.parent()
+                while main_win and not hasattr(main_win, 'get_token_func'):
+                    main_win = main_win.parent()
+                token = main_win.get_token_func() if main_win else ""
+                if not token:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "提示", "请先登录/选择用户并获取有效Token！")
+                    return
+                for task in self.manager.tasks:
+                    if task.status == '待上传':
+                        self.manager.start_upload(task, token, self.update_progress, self.update_status)
+            def delete_task(self, row):
+                if 0 <= row < len(self.manager.tasks):
+                    task = self.manager.tasks[row]
+                    # 若正在上传可加终止逻辑
+                    self.manager.tasks.pop(row)
+                    self.refresh_table()
+            def delete_selected_task(self):
+                selected_rows = sorted(set([i.row() for i in self.table.selectedIndexes()]), reverse=True)
+                for row in selected_rows:
+                    if 0 <= row < len(self.manager.tasks):
+                        self.manager.tasks.pop(row)
+                self.refresh_table()
+        self.upload_manager = UploadManager()
+        self.upload_task_widget = UploadTaskWidget(self.upload_manager, self)
+        self.stack.addWidget(self.upload_task_widget)
 
         # 侧边栏导航与内容联动
         self.nav_list.currentRowChanged.connect(self.on_nav_changed)
@@ -543,7 +783,6 @@ class MainWindow(QMainWindow):
         """)
         self.user_table.setShowGrid(True)
         # 阴影效果
-        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
         shadow = QGraphicsDropShadowEffect(self.user_table)
         shadow.setBlurRadius(18)
         shadow.setOffset(0, 4)
@@ -585,35 +824,29 @@ class MainWindow(QMainWindow):
     def on_nav_changed(self, idx):
         self.stack.setCurrentIndex(idx)
         if idx == 2:
-            self.refresh_progress_table()
-            self.start_progress_timer()
-        else:
+            # 切换到进度页面时，停止定时器，开始异步查询
             self.stop_progress_timer()
+            self.refresh_progress_table()
+        else:
+            # 离开进度页面时，停止查询线程和定时器
+            self.stop_progress_timer()
+            if self.progress_query_thread and self.progress_query_thread.isRunning():
+                self.progress_query_thread.stop()
+                self.progress_query_thread.wait()
+                self.progress_query_thread = None
         if idx == 3 and hasattr(self, 'file_list_page'):
             self.file_list_page.load_file_list()
         if idx == 4 and hasattr(self, 'download_task_widget'):
             self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
-
-    def start_progress_timer(self):
-        from PyQt5.QtCore import QTimer
-        if hasattr(self, '_progress_timer') and self._progress_timer:
-            self._progress_timer.stop()
-        self._progress_timer = QTimer(self)
-        self._progress_timer.setSingleShot(False)
-        self._progress_timer.timeout.connect(self.refresh_progress_table)
-        self._progress_timer.start(3000)
+        # 上传任务页（idx==5）
+        if idx == 5 and hasattr(self, 'upload_task_widget'):
+            self.upload_task_widget.refresh_table()
 
     def stop_progress_timer(self):
         if hasattr(self, '_progress_timer') and self._progress_timer:
             self._progress_timer.stop()
             self._progress_timer.deleteLater()
             self._progress_timer = None
-        
-        # 停止进度查询线程
-        if self.progress_query_thread and self.progress_query_thread.isRunning():
-            self.progress_query_thread.stop()
-            self.progress_query_thread.wait()
-            self.progress_query_thread = None
 
     def refresh_progress_table(self):
         """异步刷新离线进度表格"""
@@ -621,7 +854,7 @@ class MainWindow(QMainWindow):
         if not tasks:
             self.progress_table.setRowCount(0)
             return
-            
+        
         # 先显示任务列表，不查询进度
         self.progress_table.setRowCount(len(tasks))
         for row, task in enumerate(tasks):
@@ -629,12 +862,40 @@ class MainWindow(QMainWindow):
             self.progress_table.setItem(row, 1, QTableWidgetItem(task.file_name or '-'))
             from PyQt5.QtWidgets import QProgressBar
             bar = QProgressBar()
-            bar.setValue(task.progress)
-            bar.setFormat(f"{task.progress}%")
+            bar.setValue(int(task.progress))
+            bar.setFormat(f"{task.progress:.1f}%")
             bar.setAlignment(Qt.AlignCenter)
-            bar.setStyleSheet("QProgressBar{border:1px solid #d0d7de;border-radius:8px;text-align:center;height:24px;} QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);border-radius:8px;}")
+            bar.setStyleSheet("""
+QProgressBar {
+    border: 1.5px solid #d0d7de;
+    border-radius: 14px;
+    text-align: center;
+    height: 28px;
+    background: #fafdff;
+    font-size: 18px;
+    font-weight: bold;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #13C2C2, stop:1 #165DFF);
+    border-radius: 14px;
+}
+""")
             self.progress_table.setCellWidget(row, 2, bar)
-            self.progress_table.setItem(row, 3, QTableWidgetItem(task.status))
+            # 状态列美化
+            status_item = QTableWidgetItem(task.status)
+            status_item.setTextAlignment(Qt.AlignCenter)
+            if task.status == "成功":
+                status_item.setForeground(Qt.green)
+            elif task.status == "失败":
+                status_item.setForeground(Qt.red)
+            elif task.status == "进行中":
+                status_item.setForeground(Qt.blue)
+            else:
+                status_item.setForeground(Qt.darkGray)
+            font = status_item.font()
+            font.setBold(True)
+            status_item.setFont(font)
+            self.progress_table.setItem(row, 3, status_item)
         
         # 获取token
         token = ""
@@ -656,7 +917,11 @@ class MainWindow(QMainWindow):
         self.progress_query_thread = ProgressQueryThread(tasks_copy, token, self.api)
         self.progress_query_thread.progress_updated.connect(self.on_progress_updated)
         self.progress_query_thread.error_occurred.connect(self.on_progress_error)
+        self.progress_query_thread.round_completed.connect(self.on_round_completed) # 连接轮次完成信号
         self.progress_query_thread.start()
+        
+        # 不显示查询状态，保持界面简洁
+        pass
     
     def on_progress_updated(self, updated_tasks):
         """进度查询线程返回更新结果"""
@@ -674,8 +939,8 @@ class MainWindow(QMainWindow):
                         # 更新进度条
                         bar = self.progress_table.cellWidget(i, 2)
                         if bar:
-                            bar.setValue(updated_task.progress)
-                            bar.setFormat(f"{updated_task.progress}%")
+                            bar.setValue(int(updated_task.progress))
+                            bar.setFormat(f"{updated_task.progress:.1f}%")
                         # 更新状态
                         self.progress_table.setItem(i, 3, QTableWidgetItem(updated_task.status))
             
@@ -686,6 +951,13 @@ class MainWindow(QMainWindow):
     
     def on_progress_error(self, error_msg):
         """进度查询出错"""
+        if hasattr(self, 'progress_status_label'):
+            self.progress_status_label.setText(f"查询出错: {error_msg}")
+
+    def on_round_completed(self, round_number):
+        """进度查询线程完成一轮查询后触发"""
+        # 不显示轮次信息，保持界面简洁
+        pass
 
     def submit_download(self):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QProgressBar, QTextEdit, QPushButton, QLabel
@@ -926,3 +1198,10 @@ class MainWindow(QMainWindow):
         self.stop_progress_timer()
         
         super().closeEvent(event)
+
+    def get_token_func(self):
+        if self.current_user:
+            user = self.user_manager.get_user(self.current_user)
+            if user:
+                return user.get('access_token', '')
+        return ''
