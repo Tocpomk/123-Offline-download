@@ -121,20 +121,20 @@ class UserDialog(QDialog):
         self.client_secret_input.setEchoMode(QLineEdit.Normal)
         self.token_input = QLineEdit()
         self.token_input.setEchoMode(QLineEdit.Password)
-        self.token_input.setReadOnly(True)
+        self.token_input.setReadOnly(False) # 允许编辑
         self.expired_label = QLabel("")
         # Token输入框和获取Token按钮同一行
         token_hbox = QHBoxLayout()
         token_hbox.addWidget(self.token_input)
-        self.get_token_btn = QPushButton("获取Token")
+        self.get_token_btn = QPushButton("ID获取Token")
         self.get_token_btn.setMinimumWidth(110)
         self.get_token_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
         token_hbox.addWidget(self.get_token_btn)
         token_hbox.setSpacing(8)
         token_hbox.setContentsMargins(0, 0, 0, 0)
         layout.addRow(QLabel("用户名:"), self.name_input)
-        layout.addRow(QLabel("Client ID:"), self.client_id_input)
-        layout.addRow(QLabel("Client Secret:"), self.client_secret_input)
+        layout.addRow(QLabel("Client ID（可选）:"), self.client_id_input)
+        layout.addRow(QLabel("Client Secret（可选）:"), self.client_secret_input)
         layout.addRow(QLabel("Token:"), token_hbox)
         layout.addRow(QLabel("有效期:"), self.expired_label)
         # 底部确认按钮
@@ -156,7 +156,7 @@ class UserDialog(QDialog):
         client_id = self.client_id_input.text().strip()
         client_secret = self.client_secret_input.text().strip()
         if not client_id or not client_secret:
-            QMessageBox.warning(self, "提示", "请输入Client ID和Client Secret")
+            QMessageBox.warning(self, "提示", "请填写Client ID和Client Secret后获取Token，或直接手动输入Token")
             return
         try:
             token, expired_at = self.api.get_token_by_credentials(client_id, client_secret)
@@ -205,33 +205,33 @@ class MainWindow(QMainWindow):
         self.user_table.setRowCount(len(users))
         for row, (name, info) in enumerate(users.items()):
             self.user_table.setItem(row, 0, QTableWidgetItem(name))
-            # Client列脱敏
             client_id = info.get('client_id', '')
             client_secret = info.get('client_secret', '')
-            client_html = f"""
-                <div style='line-height:1.6;'>
-                    <span style='color:#165DFF;font-weight:bold;'>ID:</span> {'*' * len(client_id) if client_id else ''}<br>
-                    <span style='color:#13C2C2;font-weight:bold;'>Secret:</span> {'*' * len(client_secret) if client_secret else ''}
-                </div>
-            """
-            client_label = QLabel()
-            client_label.setTextFormat(Qt.RichText)
-            client_label.setText(client_html)
-            client_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            client_label.setStyleSheet("font-size:15px;padding:2px 0;")
-            self.user_table.setCellWidget(row, 1, client_label)
-            # Token列脱敏，时间正常显示
+            if client_id or client_secret:
+                client_html = f"""
+                    <div style='line-height:1.6;'>
+                        <span style='color:#165DFF;font-weight:bold;'>ID:</span> {'*' * len(client_id) if client_id else ''}<br>
+                        <span style='color:#13C2C2;font-weight:bold;'>Secret:</span> {'*' * len(client_secret) if client_secret else ''}
+                    </div>
+                """
+                client_label = QLabel()
+                client_label.setTextFormat(Qt.RichText)
+                client_label.setText(client_html)
+                client_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                client_label.setStyleSheet("font-size:15px;padding:2px 0;")
+                self.user_table.setCellWidget(row, 1, client_label)
+            else:
+                self.user_table.setCellWidget(row, 1, QLabel(""))
             token_val = info.get('access_token', '')
             expired_at = info.get('expired_at', '')
             token_str = f"{'*' * len(token_val) if token_val else ''}\n{expired_at}"
             token_item = QTableWidgetItem(token_str)
             self.user_table.setItem(row, 2, token_item)
-            # 操作栏按钮组优化，垂直居中
             op_widget = QWidget()
             op_layout = QHBoxLayout()
-            op_layout.setContentsMargins(0, 10, 0, 10)  # 上下各留10像素
+            op_layout.setContentsMargins(0, 10, 0, 10)
             outer_layout = QVBoxLayout()
-            outer_layout.setContentsMargins(0, 10, 0, 10)  # 上下各留10像素
+            outer_layout.setContentsMargins(0, 10, 0, 10)
             outer_layout.addStretch()
             outer_layout.addLayout(op_layout)
             outer_layout.addStretch()
@@ -246,15 +246,16 @@ class MainWindow(QMainWindow):
             btn_del = QPushButton("删除")
             btn_del.setFixedSize(56, 36)
             btn_del.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);}")
-            btn_update = QPushButton("更新")
-            btn_update.setFixedSize(56, 36)
-            btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
             op_layout.addWidget(btn_edit)
             op_layout.addWidget(btn_del)
-            op_layout.addWidget(btn_update)
             btn_edit.clicked.connect(lambda _, n=name: self.edit_user_dialog(n))
             btn_del.clicked.connect(lambda _, n=name: self.delete_user(n))
-            btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
+            if client_id and client_secret:
+                btn_update = QPushButton("更新")
+                btn_update.setFixedSize(56, 36)
+                btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
+                op_layout.addWidget(btn_update)
+                btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
         self.user_table.setColumnWidth(0, 120)
         self.user_table.setColumnWidth(3, 280)
         self.user_table.itemSelectionChanged.connect(self.check_token_expired_highlight)
@@ -264,6 +265,12 @@ class MainWindow(QMainWindow):
             return
         row = self.user_table.currentRow()
         name = self.user_table.item(row, 0).text()
+        user = self.user_manager.get_user(name)
+        client_id = user.get('client_id', '') if user else ''
+        client_secret = user.get('client_secret', '') if user else ''
+        # 只有有client_id/secret的用户才校验token过期
+        if not client_id or not client_secret:
+            return  # token用户不校验过期
         if self.user_manager.is_token_expired(name):
             # token单元格变红
             token_item = self.user_table.item(row, 2)
@@ -286,7 +293,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.0.3-beta")
+        self.setWindowTitle("123网盘离线下载工具1.0.4")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -425,7 +432,7 @@ class MainWindow(QMainWindow):
         self.set_table_column_widths()
         self.user_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.user_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.user_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.user_table.setSelectionMode(QTableWidget.MultiSelection)
         self.refresh_user_table()
         user_layout.addWidget(self.user_table)
         # 先创建按钮
@@ -1080,12 +1087,11 @@ QProgressBar::chunk {
         dlg = UserDialog(self)
         if dlg.exec_() == QDialog.Accepted:
             data = dlg.get_user_data()
-            if not data['name'] or not data['client_id'] or not data['client_secret']:
-                QMessageBox.warning(self, "提示", "请填写完整信息")
+            if not data['name'] or not data['access_token']:
+                QMessageBox.warning(self, "提示", "请填写用户名和Token")
                 return
             self.user_manager.add_user(data['name'], data['client_id'], data['client_secret'])
-            if data['access_token']:
-                self.user_manager.update_token(data['name'], data['access_token'], data['expired_at'])
+            self.user_manager.update_token(data['name'], data['access_token'], data['expired_at'])
             self.refresh_user_table()
 
     def edit_user_dialog(self, name):
@@ -1095,12 +1101,11 @@ QProgressBar::chunk {
         dlg = UserDialog(self, {**user, 'name': name})
         if dlg.exec_() == QDialog.Accepted:
             data = dlg.get_user_data()
-            if not data['name'] or not data['client_id'] or not data['client_secret']:
-                QMessageBox.warning(self, "提示", "请填写完整信息")
+            if not data['name'] or not data['access_token']:
+                QMessageBox.warning(self, "提示", "请填写用户名和Token")
                 return
             self.user_manager.add_user(data['name'], data['client_id'], data['client_secret'])
-            if data['access_token']:
-                self.user_manager.update_token(data['name'], data['access_token'], data['expired_at'])
+            self.user_manager.update_token(data['name'], data['access_token'], data['expired_at'])
             self.refresh_user_table()
 
     def delete_user(self, name):
@@ -1140,13 +1145,29 @@ QProgressBar::chunk {
         if not user:
             QMessageBox.warning(self, "提示", "用户不存在")
             return
-        if self.user_manager.is_token_expired(name):
+        client_id = user.get('client_id', '')
+        client_secret = user.get('client_secret', '')
+        if client_id and client_secret:
+            if self.user_manager.is_token_expired(name):
+                try:
+                    token, expired_at = self.api.get_token_by_credentials(user['client_id'], user['client_secret'])
+                    self.user_manager.update_token(name, token, expired_at)
+                    QMessageBox.information(self, "成功", "Token已自动刷新")
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"Token刷新失败: {e}")
+                    return
+        else:
+            # token用户，尝试用token访问接口，失败才提示token过期
             try:
-                token, expired_at = self.api.get_token_by_credentials(user['client_id'], user['client_secret'])
-                self.user_manager.update_token(name, token, expired_at)
-                QMessageBox.information(self, "成功", "Token已自动刷新")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"Token刷新失败: {e}")
+                # 以获取用户文件列表为token有效性校验
+                from core.file_api import FileApi
+                api = FileApi()
+                token = user.get('access_token', '')
+                resp = api.get_file_list(token, parent_file_id=0, limit=1)
+                if resp.get('code') != 0:
+                    raise Exception(resp.get('message', 'Token无效'))
+            except Exception:
+                QMessageBox.warning(self, "提示", "请手动更新Token，token过期无法登录")
                 return
         self.current_user = name
         self.offline_task_manager.set_user(name)
@@ -1162,7 +1183,13 @@ QProgressBar::chunk {
         self.refresh_user_table()
     def export_users(self):
         from .user_io import export_users_dialog
-        export_users_dialog(self.user_manager, self)
+        # 获取选中的用户
+        selected_rows = self.user_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "提示", "请先选择要导出的用户（可多选）")
+            return
+        selected_names = [self.user_table.item(row.row(), 0).text() for row in selected_rows]
+        export_users_dialog(self.user_manager, self, selected_names)
 
     def on_get_folder_id(self):
         token = ""
