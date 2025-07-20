@@ -19,17 +19,6 @@
 - PyQt5
 - requests
 
-### 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-> 如无 requirements.txt，可手动安装：
-> ```
-> pip install PyQt5 requests
-> ```
-
 ### 运行项目
 
 ```bash
