@@ -84,11 +84,12 @@ class UploadApi:
         resp.raise_for_status()
         return resp.json()
 
-    def complete_upload(self, token, preupload_id):
+    def complete_upload(self, token, preupload_id, max_retry=60):
         """
-        通知服务器上传完毕，返回completed和fileID
+        通知服务器上传完毕，返回completed和fileID，自动处理校验中重试
         :param token: access_token
         :param preupload_id: 预上传ID
+        :param max_retry: 最大重试次数
         :return: dict，接口返回json
         """
         if not preupload_id:
@@ -102,9 +103,25 @@ class UploadApi:
         body = {
             "preuploadID": preupload_id
         }
-        resp = requests.post(url, headers=headers, json=body, timeout=15)
-        resp.raise_for_status()
-        return resp.json()
+        import time
+        for retry in range(max_retry):
+            resp = requests.post(url, headers=headers, json=body, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            # code==0 且 completed==True 时返回
+            if data.get("code") == 0:
+                if data.get("data", {}).get("completed"):
+                    return data
+                # 校验中，自动重试
+                if data.get("data", {}).get("completed") is False and (
+                    "校验中" in data.get("message", "") or "请间隔1秒后再试" in data.get("message", "")
+                ):
+                    time.sleep(1)
+                    continue
+            # 其他情况直接返回
+            return data
+        # 超时未完成
+        return {"code": -1, "message": "上传校验超时", "data": {}}
 
     def poll_upload_result(self, token, preupload_id):
         """轮询上传结果，直到completed为True"""
