@@ -24,6 +24,17 @@
 ```bash
 python main.py
 ```
+### 登录方式
+- 秘钥登录
+通过在123云盘的开发平台申请秘钥
+<img width="1260" height="305" alt="image" src="https://github.com/user-attachments/assets/a18e59de-949a-4282-9be6-2f441386e64b" />
+<img width="556" height="402" alt="image" src="https://github.com/user-attachments/assets/3c0f746f-0b10-4012-8b94-dab04dec7224" />
+
+- token登录
+首先在网页先退出登录，然后f12打开找这个
+<img width="1820" height="945" alt="image" src="https://github.com/user-attachments/assets/6c1d26f7-0942-43c3-a4b2-27f320745f32" />
+然后点击登录，之后就会更新，复制红款圈中的就是token，填入添加即可
+<img width="1066" height="688" alt="image" src="https://github.com/user-attachments/assets/bfabb55d-2eb0-4613-a007-6652004fee89" />
 
 ## 目录结构
 
