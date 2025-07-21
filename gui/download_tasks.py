@@ -28,6 +28,10 @@ class DownloadTask:
         self.status = status
         self.progress = progress
         self.thread = None
+        self._stop_flag = False  # 新增中断标志
+
+    def stop(self):
+        self._stop_flag = True
 
     def to_dict(self):
         return {
@@ -129,6 +133,8 @@ class DownloadTaskManager:
                     with open(local_path, 'wb') as f:
                         downloaded = 0
                         for chunk in r.iter_content(chunk_size=8192):
+                            if task._stop_flag:
+                                break
                             if chunk:
                                 f.write(chunk)
                                 downloaded += len(chunk)
@@ -136,7 +142,16 @@ class DownloadTaskManager:
                                 self.update_task_status(task.file_id, '下载中', percent)
                                 if callback:
                                     callback()
-                    self.update_task_status(task.file_id, '已完成', 100)
+                    if task._stop_flag:
+                        # 被中断，删除未完成文件
+                        if os.path.exists(local_path):
+                            try:
+                                os.remove(local_path)
+                            except Exception:
+                                pass
+                        self.update_task_status(task.file_id, '已取消', 0)
+                    else:
+                        self.update_task_status(task.file_id, '已完成', 100)
             except Exception as e:
                 self.update_task_status(task.file_id, f'失败: {e}')
                 if callback:
@@ -182,6 +197,11 @@ class DownloadTaskWidget(QWidget):
         self.clear_btn.setStyleSheet('QPushButton{min-width:60px;max-width:90px;min-height:26px;max-height:32px;font-size:14px;background:#FF7875;color:#fff;border-radius:8px;} QPushButton:hover{background:#FF4D4F;}')
         self.clear_btn.clicked.connect(self.on_clear_tasks)
         path_layout.addWidget(self.clear_btn)
+        # 新增“删除任务”按钮
+        self.delete_btn = QPushButton("删除任务")
+        self.delete_btn.setStyleSheet('QPushButton{min-width:60px;max-width:90px;min-height:26px;max-height:32px;font-size:14px;background:#FF7875;color:#fff;border-radius:8px;} QPushButton:hover{background:#FF4D4F;}')
+        self.delete_btn.clicked.connect(self.on_delete_task)
+        path_layout.addWidget(self.delete_btn)
         path_layout.addStretch()
         layout.addLayout(path_layout)
         self.table = QTableWidget()
@@ -311,7 +331,39 @@ QProgressBar::chunk {
         reply = QMessageBox.question(self, "确认清空", "确定要清空所有下载任务吗？", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.manager.clear_tasks()
-            self.refresh_table() 
+            self.refresh_table()
+
+    def on_delete_task(self):
+        from PyQt5.QtWidgets import QMessageBox
+        selected = self.table.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "提示", "请先选择要删除的下载任务")
+            return
+        selected_rows = list(set([item.row() for item in selected]))
+        if not selected_rows:
+            QMessageBox.warning(self, "提示", "请先选择要删除的下载任务")
+            return
+        reply = QMessageBox.question(self, "确认删除", f"确定要删除选中的 {len(selected_rows)} 个下载任务吗？\n正在下载的任务将被终止，未完成的文件会被删除。", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            tasks = self.manager.get_tasks()
+            for i in sorted(selected_rows, reverse=True):
+                t = tasks[i]
+                # 终止线程
+                t.stop()
+                # 等待线程结束（如果在下载中）
+                if t.thread and t.thread.is_alive():
+                    t.thread.join(timeout=2)
+                # 删除未完成文件
+                if t.status != '已完成':
+                    local_path = os.path.join(t.save_path, t.file_name)
+                    if os.path.exists(local_path):
+                        try:
+                            os.remove(local_path)
+                        except Exception:
+                            pass
+                del tasks[i]
+            self.manager.save_tasks()
+            self.refresh_table()
 
 def get_offline_tasks_file(username):
     safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in username)
