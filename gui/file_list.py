@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar, QApplication, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar, QApplication, QScrollArea, QMenu, QAction, QToolButton, QAbstractItemView
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from core.file_api import FileApi
 from gui.pagination import PaginationWidget
@@ -72,6 +72,7 @@ class FileListPage(QWidget):
         self.api = FileApi()
         self.current_parent_id = 0
         self.file_list = []
+        self.file_list_cache = {}  # 新增缓存
         self.folder_path = [(0, '根目录')]
         self.page_size = 100  # 直接最大100
         self.total = 0
@@ -95,34 +96,51 @@ class FileListPage(QWidget):
         layout.addLayout(path_layout)
         # 顶部功能按钮区
         func_layout = QHBoxLayout()
-        self.create_dir_btn = QPushButton('创建目录')
-        self.create_dir_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
+        # 主操作按钮全部用QToolButton
+        self.create_dir_btn = self.make_flat_btn('创建目录', '#13C2C2', '#165DFF')
         self.create_dir_btn.clicked.connect(self.on_create_dir)
         func_layout.addWidget(self.create_dir_btn)
-        # 新增上传文件按钮
-        self.upload_btn = QPushButton('上传文件')
-        self.upload_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}')
+        self.upload_btn = self.make_flat_btn('上传文件', '#13C2C2', '#165DFF')
         self.upload_btn.clicked.connect(self.on_upload_file)
         func_layout.addWidget(self.upload_btn)
-        self.rename_btn = QPushButton('重命名')
-        self.rename_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
+        self.rename_btn = self.make_flat_btn('重命名', '#13C2C2', '#165DFF')
         self.rename_btn.clicked.connect(self.on_rename)
         func_layout.addWidget(self.rename_btn)
-        # 新增批量重命名按钮
-        self.batch_rename_btn = QPushButton('批量重命名')
-        self.batch_rename_btn.setStyleSheet('QPushButton{min-width:110px;max-width:140px;min-height:28px;max-height:32px;font-size:14px;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}')
+        self.batch_rename_btn = self.make_flat_btn('批量重命名', '#13C2C2', '#165DFF')
         self.batch_rename_btn.clicked.connect(self.on_batch_rename)
         func_layout.addWidget(self.batch_rename_btn)
-        self.delete_btn = QPushButton('删除')
-        self.delete_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
+        # 删除按钮带下拉菜单
+        menu = QMenu()
+        menu.setStyleSheet('''
+        QMenu {
+            background: #fff;
+            border: 1.5px solid #FF7A45;
+            border-radius: 8px;
+            font-size: 15px;
+            min-width: 110px;
+        }
+        QMenu::item {
+            padding: 8px 18px;
+            border-radius: 6px;
+        }
+        QMenu::item:selected {
+            background: #FFF1F0;
+            color: #FF4D4F;
+        }
+        ''')
+        act_del = QAction('删除', self)
+        act_del.triggered.connect(self.on_delete)
+        menu.addAction(act_del)
+        act_del_harmony = QAction('删除和谐', self)
+        act_del_harmony.triggered.connect(self.on_delete_harmony)
+        menu.addAction(act_del_harmony)
+        self.delete_btn = self.make_flat_btn('删除', '#FF4D4F', '#FF7A45', menu)
         self.delete_btn.clicked.connect(self.on_delete)
         func_layout.addWidget(self.delete_btn)
-        self.move_btn = QPushButton('移动')
-        self.move_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
+        self.move_btn = self.make_flat_btn('移动', '#13C2C2', '#165DFF')
         self.move_btn.clicked.connect(self.on_move)
         func_layout.addWidget(self.move_btn)
-        self.download_btn = QPushButton('下载')
-        self.download_btn.setStyleSheet('QPushButton{min-width:90px;max-width:110px;min-height:28px;max-height:32px;font-size:14px;}')
+        self.download_btn = self.make_flat_btn('下载', '#13C2C2', '#165DFF')
         self.download_btn.clicked.connect(self.on_download)
         func_layout.addWidget(self.download_btn)
         func_layout.addStretch()
@@ -151,6 +169,10 @@ class FileListPage(QWidget):
         self.select_all_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
         self.select_all_btn.clicked.connect(self.on_select_all)
         search_layout.addWidget(self.select_all_btn)
+        self.load_all_btn = QPushButton("加载全部")
+        self.load_all_btn.setStyleSheet('QPushButton{min-width:80px;max-width:100px;min-height:26px;max-height:30px;font-size:13px;background:#FFD200;color:#222;border-radius:8px;} QPushButton:hover{background:#F7971E;}')
+        self.load_all_btn.clicked.connect(self.on_load_all_files)
+        search_layout.addWidget(self.load_all_btn)
         layout.addLayout(search_layout)
         # 文件表格
         layout.addSpacing(18)
@@ -338,6 +360,18 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             self.info_label.setVisible(True)
             return
         parent_id = parent_id if parent_id is not None else self.current_parent_id
+        # 优先用缓存
+        if search_data is None and parent_id in self.file_list_cache:
+            self.file_list = self.file_list_cache[parent_id].copy()
+            self.total = len(self.file_list)
+            self.current_parent_id = parent_id
+            self.sort_column = 1
+            self.sort_order = Qt.AscendingOrder
+            self.update_path_bar()
+            self.refresh_table()
+            self.info_label.setText(f"已加载全部文件（缓存），共{self.total}个")
+            self.info_label.setVisible(True)
+            return
         page_size = self.page_size
         self.table.setRowCount(0)
         self.table.setDisabled(True)
@@ -426,7 +460,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         self.refresh_table()
         
         if self.total >= 100:
-            self.info_label.setText("接口限制，无法显示全部文件，请到官方查看")
+            self.info_label.setText("接口限制，显示全部文件请点击加载全部按钮")
             self.info_label.setVisible(True)
         else:
             self.info_label.setVisible(False)
@@ -987,3 +1021,103 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         upload_manager = main_win.upload_manager if main_win else None
         dlg = UploadDialog(self, upload_manager)
         dlg.exec_() 
+
+    def on_load_all_files(self):
+        """循环请求所有分页，合并显示全部文件"""
+        from PyQt5.QtWidgets import QApplication
+        token = self.get_token_func()
+        if not token:
+            self.info_label.setText("请先登录/选择用户")
+            self.info_label.setVisible(True)
+            return
+        parent_id = self.current_parent_id
+        page_size = self.page_size
+        self.table.setRowCount(0)
+        self.table.setDisabled(True)
+        self.info_label.setText("正在加载全部文件...")
+        self.info_label.setVisible(True)
+        QApplication.processEvents()
+        all_files = []
+        last_file_id = None
+        while True:
+            try:
+                resp = self.api.get_file_list(token, parent_file_id=parent_id, limit=page_size, last_file_id=last_file_id)
+            except Exception as e:
+                self.info_label.setText(f"获取失败：{e}")
+                self.info_label.setVisible(True)
+                self.table.setDisabled(False)
+                return
+            data = resp.get("data", {})
+            file_list = [f for f in data.get("fileList", []) if f.get('trashed', 0) == 0]
+            if not file_list:
+                break
+            all_files.extend(file_list)
+            if len(file_list) < page_size:
+                break
+            last_file_id = file_list[-1].get('fileId')
+            self.info_label.setText(f"已加载{len(all_files)}个文件...")
+            QApplication.processEvents()
+        # 验证文件数据完整性
+        valid_files = []
+        for file_info in all_files:
+            if isinstance(file_info, dict) and 'fileId' in file_info and 'filename' in file_info:
+                file_info.setdefault('type', 0)
+                file_info.setdefault('size', 0)
+                file_info.setdefault('status', 0)
+                file_info.setdefault('createAt', '')
+                valid_files.append(file_info)
+        self.file_list = valid_files.copy()
+        self.file_list_cache[parent_id] = valid_files.copy()  # 写入缓存
+        self.total = len(valid_files)
+        self.info_label.setText(f"已加载全部文件，共{self.total}个")
+        self.info_label.setVisible(True)
+        self.table.setDisabled(False)
+        self.refresh_table() 
+
+    def make_flat_btn(self, text, color1, color2, menu=None):
+        btn = QToolButton()
+        btn.setText(text)
+        btn.setPopupMode(QToolButton.MenuButtonPopup if menu else QToolButton.InstantPopup)
+        btn.setStyleSheet(f'''
+        QToolButton {{
+            min-width: 110px; max-width: 140px; min-height: 44px; max-height: 44px;
+            font-size: 18px; font-weight: bold;
+            color: #fff;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {color1},stop:1 {color2});
+            border: none;
+            border-radius: 10px;
+            padding-right: 18px;
+        }}
+        QToolButton::menu-indicator {{
+            subcontrol-origin: padding;
+            subcontrol-position: right center;
+            right: 8px;
+            width: 16px;
+            height: 16px;
+        }}
+        QToolButton:hover, QToolButton:pressed {{
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {color2},stop:1 {color1});
+        }}
+        ''')
+        if menu:
+            btn.setMenu(menu)
+        return btn
+
+    def on_delete_harmony(self):
+        from PyQt5.QtWidgets import QMessageBox
+        harmony_file_ids = [f.get('fileId') for f in self.file_list if f.get('status', 0) >= 100]
+        if not harmony_file_ids:
+            QMessageBox.information(self, "提示", "没有需要删除的审核驳回文件")
+            return
+        reply = QMessageBox.question(self, "确认删除", f"确定要删除所有审核驳回的 {len(harmony_file_ids)} 个文件/文件夹吗？\n删除后可在回收站找回。", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            token = self.get_token_func()
+            if not token:
+                QMessageBox.warning(self, "提示", "请先登录/选择用户")
+                return
+            try:
+                self.api.move_to_trash(token, harmony_file_ids)
+                QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
+                self.load_file_list()
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"删除失败: {e}") 
