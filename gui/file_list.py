@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLineEdit, QLabel, QHeaderView, QComboBox, QDialog, QProgressBar, QApplication, QScrollArea, QMenu, QAction, QToolButton, QAbstractItemView
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from core.file_api import FileApi
 from gui.pagination import PaginationWidget
 import os
@@ -33,6 +33,59 @@ class BatchRenameWorker(QThread):
                 self.progress.emit(success+fail, total)
             time.sleep(0.6)
         self.finished.emit(success, fail)
+    def stop(self):
+        self._is_running = False
+
+class AutoLoadWorker(QThread):
+    progress = pyqtSignal(int)  # 已加载文件数量
+    finished = pyqtSignal(list)  # 完整的文件列表
+    error = pyqtSignal(str)  # 错误信息
+    
+    def __init__(self, api, token, parent_id, page_size, parent=None):
+        super().__init__(parent)
+        self.api = api
+        self.token = token
+        self.parent_id = parent_id
+        self.page_size = page_size
+        self._is_running = True
+    
+    def run(self):
+        all_files = []
+        last_file_id = None
+        
+        while self._is_running:
+            try:
+                resp = self.api.get_file_list(self.token, parent_file_id=self.parent_id, limit=self.page_size, last_file_id=last_file_id)
+            except Exception as e:
+                self.error.emit(str(e))
+                return
+            
+            data = resp.get("data", {})
+            file_list = [f for f in data.get("fileList", []) if f.get('trashed', 0) == 0]
+            
+            if not file_list:
+                break
+                
+            all_files.extend(file_list)
+            self.progress.emit(len(all_files))
+            
+            if len(file_list) < self.page_size:
+                break
+                
+            last_file_id = file_list[-1].get('fileId')
+        
+        # 验证文件数据完整性
+        valid_files = []
+        for file_info in all_files:
+            if isinstance(file_info, dict) and 'fileId' in file_info and 'filename' in file_info:
+                file_info.setdefault('type', 0)
+                file_info.setdefault('size', 0)
+                file_info.setdefault('status', 0)
+                file_info.setdefault('createAt', '')
+                valid_files.append(file_info)
+        
+        self.finished.emit(valid_files)
+    
     def stop(self):
         self._is_running = False
 
@@ -79,6 +132,12 @@ class FileListPage(QWidget):
         # 排序相关
         self.sort_column = 1  # 默认按文件名排序
         self.sort_order = Qt.AscendingOrder  # 默认升序
+        # 自动加载工作线程
+        self.auto_load_worker = None
+        # 信息标签隐藏定时器
+        self.info_hide_timer = QTimer()
+        self.info_hide_timer.setSingleShot(True)
+        self.info_hide_timer.timeout.connect(self.hide_info_label)
         self.init_ui()
 
     def init_ui(self):
@@ -169,10 +228,6 @@ class FileListPage(QWidget):
         self.select_all_btn.setStyleSheet('QPushButton{min-width:70px;max-width:80px;min-height:26px;max-height:30px;font-size:13px;}')
         self.select_all_btn.clicked.connect(self.on_select_all)
         search_layout.addWidget(self.select_all_btn)
-        self.load_all_btn = QPushButton("加载全部")
-        self.load_all_btn.setStyleSheet('QPushButton{min-width:80px;max-width:100px;min-height:26px;max-height:30px;font-size:13px;background:#FFD200;color:#222;border-radius:8px;} QPushButton:hover{background:#F7971E;}')
-        self.load_all_btn.clicked.connect(self.on_load_all_files)
-        search_layout.addWidget(self.load_all_btn)
         layout.addLayout(search_layout)
         # 文件表格
         layout.addSpacing(18)
@@ -371,6 +426,8 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             self.refresh_table()
             self.info_label.setText(f"已加载全部文件（缓存），共{self.total}个")
             self.info_label.setVisible(True)
+            # 1秒后自动隐藏信息标签
+            self.info_hide_timer.start(1000)
             return
         page_size = self.page_size
         self.table.setRowCount(0)
@@ -378,6 +435,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         self.info_label.setText("加载中...")
         self.info_label.setToolTip("")
         self.info_label.setVisible(True)
+        
         def fetch():
             try:
                 resp = self.api.get_file_list(token, parent_file_id=parent_id, limit=page_size, search_data=search_data)
@@ -388,6 +446,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 self.info_label.setToolTip(str(e))
                 self.info_label.setVisible(True)
                 return {"code": -1, "message": short_msg}
+        
         class Loader(QThread):
             finished = pyqtSignal(dict)
             def run(self):
@@ -396,6 +455,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                     self.finished.emit(result)
                 except Exception as e:
                     self.finished.emit({"code": -1, "message": f"线程异常: {e}"})
+        
         self.loader = Loader()
         self.loader.finished.connect(lambda resp: self.on_file_list_loaded_safe(resp, parent_id, page_size, search_data))
         self.loader.start()
@@ -459,11 +519,72 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         self.update_path_bar()
         self.refresh_table()
         
-        if self.total >= 100:
-            self.info_label.setText("接口限制，显示全部文件请点击加载全部按钮")
-            self.info_label.setVisible(True)
+        # 检查是否需要自动加载更多文件
+        if self.total >= 100 and not search_data:
+            # 自动加载所有文件
+            self.auto_load_all_files(parent_id)
         else:
+            # 文件夹内文件少于100个，隐藏加载提示
             self.info_label.setVisible(False)
+
+    def auto_load_all_files(self, parent_id):
+        """自动分批加载所有文件"""
+        token = self.get_token_func()
+        if not token:
+            return
+        
+        # 如果已有工作线程在运行，先停止它
+        if self.auto_load_worker and self.auto_load_worker.isRunning():
+            self.auto_load_worker.stop()
+            self.auto_load_worker.wait()
+        
+        # 创建新的工作线程
+        self.auto_load_worker = AutoLoadWorker(self.api, token, parent_id, self.page_size, self)
+        self.auto_load_worker.progress.connect(self.on_auto_load_progress)
+        self.auto_load_worker.finished.connect(self.on_auto_load_finished)
+        self.auto_load_worker.error.connect(self.on_auto_load_error)
+        
+        # 更新UI状态
+        self.info_label.setText("正在自动加载全部文件...")
+        self.info_label.setVisible(True)
+        
+        # 启动工作线程
+        self.auto_load_worker.start()
+    
+    def on_auto_load_progress(self, count):
+        """自动加载进度更新"""
+        self.info_label.setText(f"已加载{count}个文件...")
+    
+    def on_auto_load_finished(self, file_list):
+        """自动加载完成"""
+        self.file_list = file_list.copy()
+        self.file_list_cache[self.current_parent_id] = file_list.copy()  # 写入缓存
+        self.total = len(file_list)
+        self.info_label.setText(f"已加载全部文件，共{self.total}个")
+        self.info_label.setVisible(True)
+        self.refresh_table()
+        
+        # 1秒后自动隐藏信息标签
+        self.info_hide_timer.start(1000)
+        
+        # 清理工作线程
+        if self.auto_load_worker:
+            self.auto_load_worker.deleteLater()
+            self.auto_load_worker = None
+    
+    def on_auto_load_error(self, error_msg):
+        """自动加载出错"""
+        self.info_label.setText(f"获取失败：{error_msg}")
+        self.info_label.setVisible(True)
+        
+        # 清理工作线程
+        if self.auto_load_worker:
+            self.auto_load_worker.deleteLater()
+            self.auto_load_worker = None
+
+    def hide_info_label(self):
+        """隐藏信息标签"""
+        self.info_label.setVisible(False)
 
     def refresh_table(self):
         """刷新表格显示"""
@@ -1022,57 +1143,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         dlg = UploadDialog(self, upload_manager)
         dlg.exec_() 
 
-    def on_load_all_files(self):
-        """循环请求所有分页，合并显示全部文件"""
-        from PyQt5.QtWidgets import QApplication
-        token = self.get_token_func()
-        if not token:
-            self.info_label.setText("请先登录/选择用户")
-            self.info_label.setVisible(True)
-            return
-        parent_id = self.current_parent_id
-        page_size = self.page_size
-        self.table.setRowCount(0)
-        self.table.setDisabled(True)
-        self.info_label.setText("正在加载全部文件...")
-        self.info_label.setVisible(True)
-        QApplication.processEvents()
-        all_files = []
-        last_file_id = None
-        while True:
-            try:
-                resp = self.api.get_file_list(token, parent_file_id=parent_id, limit=page_size, last_file_id=last_file_id)
-            except Exception as e:
-                self.info_label.setText(f"获取失败：{e}")
-                self.info_label.setVisible(True)
-                self.table.setDisabled(False)
-                return
-            data = resp.get("data", {})
-            file_list = [f for f in data.get("fileList", []) if f.get('trashed', 0) == 0]
-            if not file_list:
-                break
-            all_files.extend(file_list)
-            if len(file_list) < page_size:
-                break
-            last_file_id = file_list[-1].get('fileId')
-            self.info_label.setText(f"已加载{len(all_files)}个文件...")
-            QApplication.processEvents()
-        # 验证文件数据完整性
-        valid_files = []
-        for file_info in all_files:
-            if isinstance(file_info, dict) and 'fileId' in file_info and 'filename' in file_info:
-                file_info.setdefault('type', 0)
-                file_info.setdefault('size', 0)
-                file_info.setdefault('status', 0)
-                file_info.setdefault('createAt', '')
-                valid_files.append(file_info)
-        self.file_list = valid_files.copy()
-        self.file_list_cache[parent_id] = valid_files.copy()  # 写入缓存
-        self.total = len(valid_files)
-        self.info_label.setText(f"已加载全部文件，共{self.total}个")
-        self.info_label.setVisible(True)
-        self.table.setDisabled(False)
-        self.refresh_table() 
+ 
 
     def make_flat_btn(self, text, color1, color2, menu=None):
         btn = QToolButton()
@@ -1120,4 +1191,14 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
                 self.load_file_list()
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"删除失败: {e}") 
+                QMessageBox.critical(self, "错误", f"删除失败: {e}")
+    
+    def closeEvent(self, event):
+        """窗口关闭时清理工作线程"""
+        if self.auto_load_worker and self.auto_load_worker.isRunning():
+            self.auto_load_worker.stop()
+            self.auto_load_worker.wait()
+        # 停止定时器
+        if self.info_hide_timer.isActive():
+            self.info_hide_timer.stop()
+        super().closeEvent(event) 

@@ -9,6 +9,7 @@ from core.api import Pan123Api
 from core.storage import TokenStorage
 from core.user import UserManager
 from gui.file_list import FileListPage
+from gui.recycle_bin import RecycleBinPage
 from gui.download_tasks import DownloadTaskWidget, DownloadTaskManager, OfflineTaskManager
 from gui.folder_select_dialog import FolderSelectDialog
 from PyQt5.QtWidgets import QApplication
@@ -255,7 +256,7 @@ class MainWindow(QMainWindow):
                 btn_update.setFixedSize(56, 36)
                 btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
                 op_layout.addWidget(btn_update)
-                btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
+            btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
         self.user_table.setColumnWidth(0, 120)
         self.user_table.setColumnWidth(3, 280)
         self.user_table.itemSelectionChanged.connect(self.check_token_expired_highlight)
@@ -293,7 +294,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.0.4")
+        self.setWindowTitle("123网盘离线下载工具1.1.1")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -303,7 +304,7 @@ class MainWindow(QMainWindow):
                 icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icon_date.ico')
             if os.path.exists(icon_path):
                 icon = QIcon(icon_path)
-                self.setWindowIcon(icon)
+            self.setWindowIcon(icon)
         except Exception as e:
             pass  # 图标设置失败时忽略
         self.setStyleSheet("""
@@ -410,6 +411,7 @@ class MainWindow(QMainWindow):
         self.nav_list.addItem(QListWidgetItem("离线下载"))
         self.nav_list.addItem(QListWidgetItem("离线进度"))
         self.nav_list.addItem(QListWidgetItem("文件管理"))
+        self.nav_list.addItem(QListWidgetItem("回收站"))
         self.nav_list.addItem(QListWidgetItem("下载任务"))
         self.nav_list.addItem(QListWidgetItem("上传任务"))
         self.splitter.addWidget(self.nav_list)
@@ -441,7 +443,7 @@ class MainWindow(QMainWindow):
         self.add_user_btn.setMinimumHeight(44)
         self.add_user_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
         self.add_user_btn.clicked.connect(self.add_user_dialog)
-        self.confirm_btn = QPushButton("确认使用")
+        self.confirm_btn = QPushButton("确认登录")
         self.confirm_btn.setMinimumWidth(140)
         self.confirm_btn.setMinimumHeight(44)
         self.confirm_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
@@ -575,6 +577,9 @@ QHeaderView::section {
             return ''
         self.file_list_page = FileListPage(get_token, self)
         self.stack.addWidget(self.file_list_page)
+        # 回收站页
+        self.recycle_bin_page = RecycleBinPage(get_token, self)
+        self.stack.addWidget(self.recycle_bin_page)
         # 下载任务页
         self.download_task_widget = DownloadTaskWidget(self.download_task_manager, self)
         self.stack.addWidget(self.download_task_widget)
@@ -856,10 +861,12 @@ QProgressBar::chunk {
                 self.progress_query_thread = None
         if idx == 3 and hasattr(self, 'file_list_page'):
             self.file_list_page.load_file_list()
-        if idx == 4 and hasattr(self, 'download_task_widget'):
+        if idx == 4 and hasattr(self, 'recycle_bin_page'):
+            self.recycle_bin_page.load_recycle_bin()
+        if idx == 5 and hasattr(self, 'download_task_widget'):
             self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
-        # 上传任务页（idx==5）
-        if idx == 5 and hasattr(self, 'upload_task_widget'):
+        # 上传任务页（idx==6）
+        if idx == 6 and hasattr(self, 'upload_task_widget'):
             self.upload_task_widget.refresh_table()
 
     def stop_progress_timer(self):
@@ -963,7 +970,6 @@ QProgressBar::chunk {
                             bar.setFormat(f"{updated_task.progress:.1f}%")
                         # 更新状态
                         self.progress_table.setItem(i, 3, QTableWidgetItem(updated_task.status))
-            
             # 保存最新状态
             self.offline_task_manager.save_tasks()
         except Exception as e:
@@ -1155,7 +1161,6 @@ QProgressBar::chunk {
                     QMessageBox.information(self, "成功", "Token已自动刷新")
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"Token刷新失败: {e}")
-                    return
         else:
             # token用户，尝试用token访问接口，失败才提示token过期
             try:

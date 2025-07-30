@@ -23,7 +23,67 @@ class FileApi:
         resp = requests.get(url, headers=headers, params=params)
         return resp.json()
 
-    def create_directory(self, token, name, parent_id):
+    def get_trash_files(self, token, page=1, limit=100, order_by="file_id", order_direction="desc"):
+        """使用旧版API获取回收站文件"""
+        url = f"{self.BASE_URL}/api/v1/file/list"
+        headers = {
+            "Content-Type": "application/json",
+            "Platform": "open_platform",
+            "Authorization": f"Bearer {token}"
+        }
+        params = {
+            "parentFileId": 0,
+            "page": page,
+            "limit": limit,
+            "orderBy": order_by,
+            "orderDirection": order_direction,
+            "trashed": True  # 直接查询回收站文件
+        }
+        
+        try:
+            resp = requests.get(url, headers=headers, params=params)
+            
+            if resp.status_code != 200:
+                return {"code": -1, "message": f"HTTP错误: {resp.status_code}", "data": {}}
+            
+            json_data = resp.json()
+            return json_data
+        except Exception as e:
+            return {"code": -1, "message": f"请求异常: {str(e)}", "data": {}}
+
+    def get_trash_files_v2(self, token, limit=100, last_file_id=None):
+        """使用新版API获取回收站文件（通过过滤trashed=1的文件）"""
+        url = f"{self.BASE_URL}/api/v2/file/list"
+        headers = {
+            "Content-Type": "application/json",
+            "Platform": "open_platform",
+            "Authorization": f"Bearer {token}"
+        }
+        params = {
+            "parentFileId": 0,
+            "limit": limit
+        }
+        if last_file_id is not None:
+            params["lastFileId"] = last_file_id
+            
+        
+        try:
+            resp = requests.get(url, headers=headers, params=params)
+            
+            if resp.status_code != 200:
+                return {"code": -1, "message": f"HTTP错误: {resp.status_code}", "data": {}}
+            
+            json_data = resp.json()
+            
+            # 过滤出回收站文件
+            if json_data.get("code") == 0 and "data" in json_data:
+                file_list = json_data["data"].get("fileList", [])
+                trashed_files = [f for f in file_list if f.get("trashed") == 1]
+                json_data["data"]["fileList"] = trashed_files
+            
+            return json_data
+        except Exception as e:
+            return {"code": -1, "message": f"请求异常: {str(e)}", "data": {}}
         url = f"{self.BASE_URL}/upload/v1/file/mkdir"
         headers = {
             "Content-Type": "application/json",
@@ -118,4 +178,38 @@ class FileApi:
         data = resp.json()
         if data.get("code") == 0 and data.get("data", {}).get("downloadUrl"):
             return data["data"]["downloadUrl"]
-        raise Exception(data.get("message", "获取下载地址失败")) 
+        raise Exception(data.get("message", "获取下载地址失败"))
+
+    def recover_file(self, token, file_ids):
+        """从回收站恢复文件"""
+        url = f"{self.BASE_URL}/api/v1/file/recover"
+        headers = {
+            "Content-Type": "application/json",
+            "Platform": "open_platform",
+            "Authorization": f"Bearer {token}"
+        }
+        payload = {
+            "fileIDs": file_ids
+        }
+        resp = requests.post(url, json=payload, headers=headers)
+        data = resp.json()
+        if data.get("code") == 0:
+            return True
+        raise Exception(data.get("message", "恢复文件失败"))
+
+    def delete_file_permanently(self, token, file_ids):
+        """彻底删除文件（从回收站）"""
+        url = f"{self.BASE_URL}/api/v1/file/delete"
+        headers = {
+            "Content-Type": "application/json",
+            "Platform": "open_platform",
+            "Authorization": f"Bearer {token}"
+        }
+        payload = {
+            "fileIDs": file_ids
+        }
+        resp = requests.post(url, json=payload, headers=headers)
+        data = resp.json()
+        if data.get("code") == 0:
+            return True
+        raise Exception(data.get("message", "彻底删除文件失败")) 
