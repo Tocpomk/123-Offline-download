@@ -228,38 +228,88 @@ class MainWindow(QMainWindow):
             token_str = f"{'*' * len(token_val) if token_val else ''}\n{expired_at}"
             token_item = QTableWidgetItem(token_str)
             self.user_table.setItem(row, 2, token_item)
-            op_widget = QWidget()
-            op_layout = QHBoxLayout()
-            op_layout.setContentsMargins(0, 10, 0, 10)
-            outer_layout = QVBoxLayout()
-            outer_layout.setContentsMargins(0, 10, 0, 10)
-            outer_layout.addStretch()
-            outer_layout.addLayout(op_layout)
-            outer_layout.addStretch()
-            op_widget.setLayout(outer_layout)
-            op_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-            op_widget.setMinimumHeight(60)
-            self.user_table.setCellWidget(row, 3, op_widget)
-            self.user_table.setRowHeight(row, 90)
-            btn_edit = QPushButton("编辑")
-            btn_edit.setFixedSize(56, 36)
-            btn_edit.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
-            btn_del = QPushButton("删除")
-            btn_del.setFixedSize(56, 36)
-            btn_del.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #FF7A45);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #D9363E,stop:1 #FF7A45);}")
-            op_layout.addWidget(btn_edit)
-            op_layout.addWidget(btn_del)
-            btn_edit.clicked.connect(lambda _, n=name: self.edit_user_dialog(n))
-            btn_del.clicked.connect(lambda _, n=name: self.delete_user(n))
-            if client_id and client_secret:
-                btn_update = QPushButton("更新")
-                btn_update.setFixedSize(56, 36)
-                btn_update.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:8px;font-size:16px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
-                op_layout.addWidget(btn_update)
-            btn_update.clicked.connect(lambda _, n=name: self.update_token(n))
-        self.user_table.setColumnWidth(0, 120)
-        self.user_table.setColumnWidth(3, 280)
+            # 创建时间
+            created_at = info.get('created_at', '')
+            created_item = QTableWidgetItem(created_at)
+            self.user_table.setItem(row, 3, created_item)
+        self.user_table.setColumnWidth(0, 100)  # 用户名（窄）
+        self.user_table.setColumnWidth(1, 450)  # Client（宽）
+        self.user_table.setColumnWidth(2, 450)  # Token（宽）
+        self.user_table.setColumnWidth(3, 80)   # 创建时间（窄）
         self.user_table.itemSelectionChanged.connect(self.check_token_expired_highlight)
+    
+    def on_user_table_context_menu(self, pos):
+        """用户表格右击菜单"""
+        from PyQt5.QtWidgets import QMenu, QAction
+        
+        # 获取点击的行
+        index = self.user_table.indexAt(pos)
+        if not index.isValid():
+            return
+        
+        row = index.row()
+        name = self.user_table.item(row, 0).text()
+        user = self.user_manager.get_user(name)
+        if not user:
+            return
+        
+        # 创建菜单
+        menu = QMenu(self.user_table)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #ffffff;
+                border: 2px solid #e1e5e9;
+                border-radius: 12px;
+                padding: 8px 0px;
+                font-size: 15px;
+                min-width: 160px;
+            }
+            QMenu::item {
+                padding: 10px 20px;
+                border-radius: 8px;
+                margin: 2px 8px;
+                color: #333333;
+            }
+            QMenu::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e6f7ff, stop:1 #cce7ff);
+                color: #165DFF;
+                border: 1px solid #165DFF;
+            }
+            QMenu::item:hover {
+                background: #f0f5ff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #e1e5e9;
+                margin: 4px 12px;
+                border-radius: 1px;
+            }
+        """)
+        
+        # 编辑操作
+        edit_action = QAction('编辑', self.user_table)
+        edit_action.triggered.connect(lambda: self.edit_user_dialog(name))
+        menu.addAction(edit_action)
+        
+        # 只有有client_id和client_secret的用户才显示更新选项
+        client_id = user.get('client_id', '')
+        client_secret = user.get('client_secret', '')
+        if client_id and client_secret:
+            update_action = QAction('更新Token', self.user_table)
+            update_action.triggered.connect(lambda: self.update_token(name))
+            menu.addAction(update_action)
+        
+        # 添加分隔线
+        menu.addSeparator()
+        
+        # 删除操作
+        delete_action = QAction('删除', self.user_table)
+        delete_action.triggered.connect(lambda: self.delete_user(name))
+        menu.addAction(delete_action)
+        
+        # 显示菜单
+        menu.exec_(self.user_table.viewport().mapToGlobal(pos))
+    
     def check_token_expired_highlight(self):
         selected = self.user_table.selectedItems()
         if not selected:
@@ -294,7 +344,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.1.1")
+        self.setWindowTitle("123网盘离线下载工具1.1.2")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -427,14 +477,17 @@ class MainWindow(QMainWindow):
         user_layout.setSpacing(6)
         self.user_table = QTableWidget()
         self.user_table.setColumnCount(4)
-        self.user_table.setHorizontalHeaderLabels(["用户名", "Client", "Token", "操作"])
+        self.user_table.setHorizontalHeaderLabels(["用户名", "Client", "Token", "创建时间"])
         self.user_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 填满父容器
         self.user_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.user_table.horizontalHeader().setStretchLastSection(True)
         self.set_table_column_widths()
         self.user_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.user_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.user_table.setSelectionMode(QTableWidget.MultiSelection)
+        self.user_table.setSelectionMode(QTableWidget.SingleSelection)
+        # 启用右击菜单
+        self.user_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.user_table.customContextMenuRequested.connect(self.on_user_table_context_menu)
         self.refresh_user_table()
         user_layout.addWidget(self.user_table)
         # 先创建按钮
@@ -785,7 +838,7 @@ QProgressBar::chunk {
             }
             QTableWidget::item {
                 border-radius: 4px;
-                padding: 4px 6px;
+                padding: 8px 6px;
                 margin: 2px;
             }
             QTableWidget::item:selected {
@@ -807,6 +860,8 @@ QProgressBar::chunk {
             }
         """)
         self.user_table.setShowGrid(True)
+        # 设置行高
+        self.user_table.verticalHeader().setDefaultSectionSize(108)  # 36 * 3
         # 阴影效果
         shadow = QGraphicsDropShadowEffect(self.user_table)
         shadow.setBlurRadius(18)
@@ -818,12 +873,12 @@ QProgressBar::chunk {
         self.user_table.setSelectionMode(QTableWidget.SingleSelection)
 
     def set_table_column_widths(self):
-        # 前三列固定宽度，操作列自适应填满右侧
+        # 设置列宽：用户名、Client、Token、创建时间
         header = self.user_table.horizontalHeader()
-        self.user_table.setColumnWidth(0, 120)
-        self.user_table.setColumnWidth(1, 220)
-        self.user_table.setColumnWidth(2, 260)
-        # 第3列（操作）不设置宽度，由setStretchLastSection控制
+        self.user_table.setColumnWidth(0, 100)  # 用户名（窄）
+        self.user_table.setColumnWidth(1, 450)  # Client（宽）
+        self.user_table.setColumnWidth(2, 450)  # Token（宽）
+        self.user_table.setColumnWidth(3, 80)   # 创建时间（窄）
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1110,8 +1165,16 @@ QProgressBar::chunk {
             if not data['name'] or not data['access_token']:
                 QMessageBox.warning(self, "提示", "请填写用户名和Token")
                 return
+            # 保留原有的创建时间
+            created_at = user.get('created_at', '')
+            # 删除旧用户并添加新用户
+            self.user_manager.delete_user(name)
             self.user_manager.add_user(data['name'], data['client_id'], data['client_secret'])
+            # 更新token和创建时间
             self.user_manager.update_token(data['name'], data['access_token'], data['expired_at'])
+            if created_at:
+                self.user_manager.users[data['name']]['created_at'] = created_at
+                self.user_manager.save()
             self.refresh_user_table()
 
     def delete_user(self, name):

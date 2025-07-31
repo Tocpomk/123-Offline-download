@@ -232,7 +232,6 @@ class RecycleBinPage(QWidget):
                 padding: 8px;
                 border-bottom: 1px solid #f0f0f0;
                 border-radius: 6px;
-                transition: background 0.2s;
             }
             QTableWidget::item:hover {
                 background: #f0f5ff;

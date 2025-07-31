@@ -40,13 +40,27 @@ def save_users(users):
 class UserManager:
     def __init__(self):
         self.users = load_users()
+        # 为现有用户添加创建时间字段
+        self._add_created_at_to_existing_users()
+    
+    def _add_created_at_to_existing_users(self):
+        """为现有用户添加创建时间字段"""
+        modified = False
+        for name, user_info in self.users.items():
+            if 'created_at' not in user_info:
+                user_info['created_at'] = '2024-01-01 00:00:00'  # 默认创建时间
+                modified = True
+        
+        if modified:
+            save_users(self.users)
 
     def add_user(self, name, client_id, client_secret):
         self.users[name] = {
             'client_id': client_id,
             'client_secret': client_secret,
             'access_token': '',
-            'expired_at': ''
+            'expired_at': '',
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         save_users(self.users)
 
@@ -78,3 +92,7 @@ class UserManager:
         if name in self.users:
             del self.users[name]
             save_users(self.users)
+    
+    def save(self):
+        """保存用户数据"""
+        save_users(self.users)
