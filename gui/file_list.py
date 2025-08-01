@@ -1271,7 +1271,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 if resp:
                     QMessageBox.information(self, "成功", f"目录 '{dir_name}' 创建成功！")
                     self.clear_cache()  # 清除缓存
-                    self.load_file_list()
+                    self.load_file_list(parent_id=self.current_parent_id)
                 else:
                     QMessageBox.warning(self, "失败", "目录创建失败")
             except Exception as e:
@@ -1306,7 +1306,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                         self.api.rename_file(token, file_id, new_name)
                         QMessageBox.information(self, "成功", f"重命名成功！")
                         self.clear_cache()  # 清除缓存
-                        self.load_file_list()
+                        self.load_file_list(parent_id=self.current_parent_id)
                     except Exception as e:
                         QMessageBox.critical(self, "错误", f"重命名失败: {e}")
         elif len(selected_rows) > 1:
@@ -1373,7 +1373,8 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                     time.sleep(1.2)
                     progress_dlg.accept()
                     QMessageBox.information(self, "批量重命名", f"重命名完成，成功{success}个，失败{fail}个。")
-                    self.on_refresh()
+                    self.clear_cache()  # 清除缓存
+                    self.load_file_list(parent_id=self.current_parent_id)
                 worker.progress.connect(on_progress)
                 worker.finished.connect(on_finished)
                 progress_dlg.cancel_btn.clicked.connect(worker.stop)
@@ -1405,7 +1406,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 self.api.move_to_trash(token, file_ids)
                 QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
                 self.clear_cache()  # 清除缓存
-                self.load_file_list()
+                self.load_file_list(parent_id=self.current_parent_id)
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {e}") 
 
@@ -1444,7 +1445,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                     self.api.move_files(token, file_ids, to_parent_id)
                     QMessageBox.information(self, "成功", f"移动成功！")
                     self.clear_cache()  # 清除缓存
-                    self.load_file_list()
+                    self.load_file_list(parent_id=self.current_parent_id)
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"移动失败: {e}") 
 
@@ -1636,7 +1637,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                                 self.api.rename_file(token, file_id, new_name)
                                 QMessageBox.information(self, "成功", f"重命名成功！")
                                 self.clear_cache()  # 清除缓存
-                                self.load_file_list()
+                                self.load_file_list(parent_id=self.current_parent_id)
                             except Exception as e:
                                 QMessageBox.critical(self, "错误", f"重命名失败: {e}")
                 else:
@@ -1678,7 +1679,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                                 QApplication.processEvents()
                                 QTimer.singleShot(1500, progress_dlg.close)
                                 self.clear_cache()  # 清除缓存
-                                self.load_file_list()
+                                self.load_file_list(parent_id=self.current_parent_id)
                             
                             worker.progress.connect(on_progress)
                             worker.finished.connect(on_finished)
@@ -1738,7 +1739,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                                     QApplication.processEvents()
                                     QTimer.singleShot(1500, progress_dlg.close)
                                     self.clear_cache()  # 清除缓存
-                                    self.load_file_list()
+                                    self.load_file_list(parent_id=self.current_parent_id)
                                 
                                 worker.progress.connect(on_progress)
                                 worker.finished.connect(on_finished)
@@ -1777,7 +1778,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                         self.api.move_to_trash(token, file_ids)
                         QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
                         self.clear_cache()  # 清除缓存
-                        self.load_file_list()
+                        self.load_file_list(parent_id=self.current_parent_id)
                     except Exception as e:
                         QMessageBox.critical(self, "错误", f"删除失败: {e}")
             delete_action.triggered.connect(do_delete)
@@ -1812,7 +1813,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                             self.api.move_files(token, file_ids, to_parent_id)
                             QMessageBox.information(self, "成功", f"移动成功！")
                             self.clear_cache()  # 清除缓存
-                            self.load_file_list()
+                            self.load_file_list(parent_id=self.current_parent_id)
                         except Exception as e:
                             QMessageBox.critical(self, "错误", f"移动失败: {e}")
             move_action.triggered.connect(do_move)
@@ -2015,10 +2016,10 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 
     def on_clear_search(self):
         self.search_input.clear()
-        self.load_file_list() 
+        self.load_file_list(parent_id=self.current_parent_id) 
 
     def on_refresh(self):
-        self.load_file_list() 
+        self.load_file_list(parent_id=self.current_parent_id) 
 
     def format_size(self, size):
         if not size:
@@ -2086,7 +2087,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 self.api.move_to_trash(token, harmony_file_ids)
                 QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
                 self.clear_cache()  # 清除缓存
-                self.load_file_list()
+                self.load_file_list(parent_id=self.current_parent_id)
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {e}")
     
