@@ -73,7 +73,7 @@ class BatchRenameDialog(QDialog):
         
         # 自动模式下的二级选项
         self.auto_submode_combo = QComboBox()
-        self.auto_submode_combo.addItems(["按最多模板", "(Bug)按序号1模板"])
+        self.auto_submode_combo.addItems(["按最多模板", "序列最低模板"])
         self.auto_submode_combo.setFixedWidth(180)  # 加宽二级菜单
         self.auto_submode_combo.setVisible(False)
         self.auto_submode_combo.currentIndexChanged.connect(self.on_preview)
@@ -318,59 +318,163 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         elif mode == "自动模式":
             submode = self.auto_submode_combo.currentText()
             
-            if submode == "按序号1模板":
-                # 清理之前的重命名列表
-                self.rename_list.clear()
+            if submode == "序列最低模板":
+                # 使用和"按最多模板"相同的机制，但选择主模板的方式不同
+                import difflib
                 
-                # 首先找出所有序号
-                episode_numbers = []
+                # 改进剧集信息提取函数
+                def extract_episode_info(name):
+                    # 提取英文集数(SxxExx)
+                    en_ep_match = re.search(r'(S\d{1,2}E\d{1,3})', name, re.I)
+                    en_episode = en_ep_match.group(0) if en_ep_match else None
+                    
+                    # 提取中文集数(第x集)
+                    ch_ep_match = re.search(r'(第[零一二三四五六七八九十百千万\d]+[集话話])', name)
+                    ch_episode = ch_ep_match.group(0) if ch_ep_match else None
+                    
+                    # 如果只有英文集数没有中文集数，尝试从英文集数提取集号并生成中文集数
+                    episode_num = None
+                    if en_episode and not ch_episode:
+                        num_match = re.search(r'E(\d{1,3})', en_episode, re.I)
+                        if num_match:
+                            episode_num = int(num_match.group(1))
+                    
+                    return {
+                        'en_episode': en_episode,
+                        'ch_episode': ch_episode,
+                        'episode_num': episode_num,
+                        'ch_match': ch_ep_match,
+                        'en_match': en_ep_match
+                    }
+                
+                # 分析所有文件结构
+                pattern_counter = Counter()
+                file_infos_enhanced = []
                 for info in self.file_infos:
-                    old_name = info['file_name']
-                    # 使用提取剧集号的函数
-                    ep_num = self.extract_episode_number(old_name)
-                    if ep_num:
-                        try:
-                            # 提取数字部分
-                            num = int(re.search(r'\d+', str(ep_num)).group())
-                            episode_numbers.append(num)
-                        except (ValueError, AttributeError):
-                            episode_numbers.append(None)
-                    else:
-                        episode_numbers.append(None)
-                
-                # 获取有效的最小序号
-                valid_numbers = [n for n in episode_numbers if n is not None]
-                min_number = min(valid_numbers) if valid_numbers else 1
-                
-                # 重命名处理
-                for i, (info, ep_num) in enumerate(zip(self.file_infos, episode_numbers)):
-                    old_name = info['file_name']
-                    ext = self.get_ext(old_name)
+                    name = info['file_name']
+                    ep_info = extract_episode_info(name)
                     
-                    if ep_num is not None:
-                        # 保持相对序号关系
-                        adjusted_num = ep_num - min_number + 1
-                        new_name = f'S01E{adjusted_num:03d}{ext}'
-                    else:
-                        # 如果没有序号，使用位置索引
-                        new_name = f'S01E{i+1:03d}{ext}'
+                    # 确定集数部分的位置
+                    matches = []
+                    if ep_info['en_match']:
+                        matches.append(ep_info['en_match'])
+                    if ep_info['ch_match']:
+                        matches.append(ep_info['ch_match'])
                     
-                # 只有当新文件名与原文件名不同时才添加到重命名列表
-                if new_name != old_name:
-                    self.rename_list.append({
-                        'file_id': info['file_id'],
-                        'old_name': old_name,
-                        'new_name': new_name
+                    # 如果没有找到任何集数，保持原名
+                    if not matches:
+                        pattern_counter[name] += 1
+                        file_infos_enhanced.append({
+                            'template': name,
+                            'ep_info': ep_info,
+                            'original': name
+                        })
+                        continue
+                    
+                    # 按出现顺序排序
+                    matches.sort(key=lambda m: m.start())
+                    
+                    # 构建分段列表
+                    parts = []
+                    last_end = 0
+                    for i, match in enumerate(matches):
+                        # 添加匹配前的部分
+                        if match.start() > last_end:
+                            parts.append(name[last_end:match.start()])
+                        
+                        # 添加占位符
+                        if 'S' in match.group(0):
+                            parts.append("{en_episode}")
+                        else:
+                            parts.append("{ch_episode}")
+                        
+                        last_end = match.end()
+                    
+                    # 添加最后部分
+                    if last_end < len(name):
+                        parts.append(name[last_end:])
+                    
+                    # 构建完整模板
+                    template = "".join(parts)
+                    pattern_counter[template] += 1
+                    file_infos_enhanced.append({
+                        'template': template,
+                        'ep_info': ep_info,
+                        'original': name
                     })
                 
-                # 更新表格显示
-                self.table.setItem(i, 0, QTableWidgetItem(info['file_id']))
-                old_item = QTableWidgetItem(old_name)
-                old_item.setToolTip(old_name)
-                self.table.setItem(i, 1, old_item)
-                new_item = QTableWidgetItem(new_name)
-                new_item.setToolTip(new_name)
-                self.table.setItem(i, 2, new_item)                # 直接返回，不执行后面的模板匹配逻辑
+                # 选择序号最低的文件作为主模板（而不是使用最多的模板）
+                min_episode_num = float('inf')
+                main_template = None
+                
+                for info, templ_info in zip(self.file_infos, file_infos_enhanced):
+                    ep_info = templ_info['ep_info']
+                    if ep_info['episode_num'] is not None and ep_info['episode_num'] < min_episode_num:
+                        min_episode_num = ep_info['episode_num']
+                        main_template = templ_info['template']
+                
+                # 如果没有找到有效的序号，使用第一个模板
+                if main_template is None and file_infos_enhanced:
+                    main_template = file_infos_enhanced[0]['template']
+                
+                # 生成新文件名
+                for i, (info, templ_info) in enumerate(zip(self.file_infos, file_infos_enhanced)):
+                    old_name = info['file_name']
+                    if not main_template:
+                        new_name = old_name
+                    else:
+                        ep_info = templ_info['ep_info']
+                        
+                        # 保持原有的集数
+                        en_episode = ep_info['en_episode']
+                        ch_episode = ep_info['ch_episode']
+                        
+                        # 如果缺少英文集数但有数字
+                        if not en_episode and ep_info['episode_num']:
+                            # 从已有的其他文件中推断季数
+                            season_num = "01"  # 默认第一季
+                            for other_info in file_infos_enhanced:
+                                if other_info['ep_info']['en_episode']:
+                                    season_match = re.search(r'S(\d{2})', other_info['ep_info']['en_episode'], re.I)
+                                    if season_match:
+                                        season_num = season_match.group(1)
+                                        break
+                            en_episode = f"S{season_num}E{ep_info['episode_num']:02d}"
+                        
+                        # 如果缺少中文集数但有数字
+                        if not ch_episode and ep_info['episode_num']:
+                            ch_episode = f"第{number_to_chinese(ep_info['episode_num'])}集"
+                        
+                        # 应用主模板
+                        new_name = main_template
+                        # 确保替换值不为None
+                        if "{en_episode}" in new_name:
+                            new_name = new_name.replace("{en_episode}", en_episode or "")
+                        if "{ch_episode}" in new_name:
+                            new_name = new_name.replace("{ch_episode}", ch_episode or "")
+                        
+                        # 移除可能的双重点号和连续的空格
+                        new_name = re.sub(r'\.\.+', '.', new_name)
+                        new_name = re.sub(r'\s+', ' ', new_name).strip()
+                    
+                    # 只有当新文件名与原文件名不同时才添加到重命名列表
+                    if new_name != old_name:
+                        self.rename_list.append({
+                            'file_id': info['file_id'],
+                            'old_name': old_name,
+                            'new_name': new_name
+                        })
+                    
+                    # 更新表格显示
+                    self.table.setItem(i, 0, QTableWidgetItem(info['file_id']))
+                    old_item = QTableWidgetItem(old_name)
+                    old_item.setToolTip(old_name)
+                    self.table.setItem(i, 1, old_item)
+                    new_item = QTableWidgetItem(new_name)
+                    new_item.setToolTip(new_name)
+                    self.table.setItem(i, 2, new_item)
+                
+                # 直接返回，不执行后面的模板匹配逻辑
                 return
                 
             # 按最多模板模式的处理

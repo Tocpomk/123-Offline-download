@@ -8,6 +8,8 @@ from .utils import get_user_data_dir, get_base_path
 
 # 用户数据文件路径
 USER_FILE = os.path.join(get_user_data_dir(), 'users.json')
+# 记忆登录配置文件路径
+REMEMBER_LOGIN_FILE = os.path.join(get_user_data_dir(), 'remember_login.json')
 
 # 如果用户数据文件不存在，但开发环境中的默认文件存在，则复制它
 def init_user_file():
@@ -36,6 +38,21 @@ def load_users():
 def save_users(users):
     with open(USER_FILE, 'w', encoding='utf-8') as f:
         json.dump(users, f, ensure_ascii=False, indent=2)
+
+def load_remember_login():
+    """加载记忆登录配置"""
+    if not os.path.exists(REMEMBER_LOGIN_FILE):
+        return {'enabled': False, 'last_user': None}
+    try:
+        with open(REMEMBER_LOGIN_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {'enabled': False, 'last_user': None}
+
+def save_remember_login(config):
+    """保存记忆登录配置"""
+    with open(REMEMBER_LOGIN_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 
 class UserManager:
     def __init__(self):
@@ -96,3 +113,24 @@ class UserManager:
     def save(self):
         """保存用户数据"""
         save_users(self.users)
+    
+    def save_remember_login_config(self, enabled, username=None):
+        """保存记忆登录配置"""
+        config = {
+            'enabled': enabled,
+            'last_user': username if enabled else None
+        }
+        save_remember_login(config)
+    
+    def get_remember_login_config(self):
+        """获取记忆登录配置"""
+        return load_remember_login()
+    
+    def get_last_login_user(self):
+        """获取最后登录的用户名"""
+        config = self.get_remember_login_config()
+        if config.get('enabled') and config.get('last_user'):
+            # 检查用户是否还存在
+            if config['last_user'] in self.users:
+                return config['last_user']
+        return None

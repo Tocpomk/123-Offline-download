@@ -236,10 +236,144 @@ class ProgressDialog(QDialog):
 class FileListPage(QWidget):
     # 自定义重命名对话框类
     class RenameDialog(QDialog):
-        def __init__(self, old_name, parent=None):
+        def __init__(self, file_infos, parent=None):
             super().__init__(parent)
+            self.file_infos = file_infos  # 存储文件信息列表
             self.setWindowTitle("重命名")
             self.setFixedSize(500, 180)
+            self.setStyleSheet("""
+                QDialog {
+                    background: #ffffff;
+                    border: 2px solid #e1e5e9;
+                    border-radius: 12px;
+                }
+                QLabel {
+                    font-size: 15px;
+                    color: #333333;
+                    padding: 8px 0px;
+                }
+                QLineEdit {
+                    border: 2px solid #e1e5e9;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 15px;
+                    background: #fafdff;
+                    min-height: 20px;
+                }
+                QLineEdit:focus {
+                    border-color: #165DFF;
+                    background: #ffffff;
+                }
+                QPushButton {
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 10px 24px;
+                    font-size: 15px;
+                    min-width: 100px;
+                    min-height: 36px;
+                }
+                QPushButton#confirmBtn {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #165DFF, stop:1 #0FC6C2);
+                    color: #ffffff;
+                }
+                QPushButton#confirmBtn:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0E4FE1, stop:1 #0FC6C2);
+                }
+                QPushButton#confirmBtn:disabled {
+                    background: #cccccc;
+                    color: #999999;
+                }
+                QPushButton#cancelBtn {
+                    background: #f5f5f5;
+                    color: #666666;
+                    border: 1px solid #d9d9d9;
+                }
+                QPushButton#cancelBtn:hover {
+                    background: #e6e6e6;
+                    color: #333333;
+                }
+            """)
+            
+            layout = QVBoxLayout(self)
+            layout.setSpacing(20)
+            layout.setContentsMargins(30, 30, 30, 30)
+            
+            # 显示选中的文件信息
+            if len(file_infos) == 1:
+                # 单选：显示文件名输入框
+                self.name_edit = QLineEdit(file_infos[0]['file_name'])
+                self.name_edit.selectAll()  # 自动选中所有文本
+                layout.addWidget(self.name_edit)
+            else:
+                # 多选：显示文件列表
+                from PyQt5.QtWidgets import QTextEdit
+                info_label = QLabel(f"已选择 {len(file_infos)} 个文件/文件夹：")
+                layout.addWidget(info_label)
+                
+                self.file_list_edit = QTextEdit()
+                self.file_list_edit.setMaximumHeight(80)
+                self.file_list_edit.setReadOnly(True)
+                file_names = [info['file_name'] for info in file_infos]
+                self.file_list_edit.setPlainText('\n'.join(file_names))
+                layout.addWidget(self.file_list_edit)
+                
+                # 多选时不允许重命名，只显示文件列表
+                info_label2 = QLabel("多选时请使用批量重命名功能")
+                info_label2.setStyleSheet("color: #666666; font-size: 13px;")
+                layout.addWidget(info_label2)
+            
+            # 添加弹性空间，让按钮不贴着底边
+            layout.addStretch()
+            
+            # 按钮布局
+            btn_layout = QHBoxLayout()
+            btn_layout.addStretch()
+            
+            # 确认按钮
+            self.confirm_btn = QPushButton("确认")
+            self.confirm_btn.setObjectName("confirmBtn")
+            self.confirm_btn.clicked.connect(self.accept)
+            btn_layout.addWidget(self.confirm_btn)
+            
+            btn_layout.addSpacing(16)
+            
+            # 取消按钮
+            self.cancel_btn = QPushButton("取消")
+            self.cancel_btn.setObjectName("cancelBtn")
+            self.cancel_btn.clicked.connect(self.reject)
+            btn_layout.addWidget(self.cancel_btn)
+            
+            btn_layout.addStretch()
+            layout.addLayout(btn_layout)
+            
+            # 设置回车键确认
+            if len(file_infos) == 1:
+                self.name_edit.returnPressed.connect(self.accept)
+                # 设置焦点到输入框
+                self.name_edit.setFocus()
+            else:
+                # 多选时禁用确认按钮并修改文本
+                self.confirm_btn.setEnabled(False)
+                self.confirm_btn.setText("仅查看")
+                # 设置焦点到取消按钮
+                self.cancel_btn.setFocus()
+        
+        def get_new_name(self):
+            if len(self.file_infos) == 1:
+                return self.name_edit.text().strip()
+            return None
+        
+        def get_file_infos(self):
+            return self.file_infos
+    
+    # 多文件重命名对话框类
+    class MultiRenameDialog(QDialog):
+        def __init__(self, file_infos, parent=None):
+            super().__init__(parent)
+            self.file_infos = file_infos
+            self.setWindowTitle("重命名")
+            self.resize(700, 500)  # 更大更宽
             self.setStyleSheet("""
                 QDialog {
                     background: #ffffff;
@@ -288,19 +422,57 @@ class FileListPage(QWidget):
                     background: #e6e6e6;
                     color: #333333;
                 }
+                QScrollArea {
+                    border: none;
+                    background: transparent;
+                }
+                QWidget#scrollContent {
+                    background: transparent;
+                }
             """)
             
             layout = QVBoxLayout(self)
             layout.setSpacing(20)
             layout.setContentsMargins(30, 30, 30, 30)
             
-            # 输入框
-            self.name_edit = QLineEdit(old_name)
-            self.name_edit.selectAll()  # 自动选中所有文本
-            layout.addWidget(self.name_edit)
+            # 标题
+            title_label = QLabel(f"重命名 {len(file_infos)} 个文件/文件夹")
+            title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333333;")
+            layout.addWidget(title_label)
             
-            # 添加弹性空间，让按钮不贴着底边
-            layout.addStretch()
+            # 滚动区域
+            from PyQt5.QtWidgets import QScrollArea
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setMaximumHeight(350)  # 增加高度
+            
+            # 滚动内容
+            scroll_content = QWidget()
+            scroll_content.setObjectName("scrollContent")
+            scroll_layout = QVBoxLayout(scroll_content)
+            scroll_layout.setSpacing(12)  # 增加间距
+            
+            # 创建输入框
+            self.line_edits = []
+            for i, file_info in enumerate(file_infos):
+                row_layout = QHBoxLayout()
+                
+                # 序号标签
+                index_label = QLabel(f"{i+1}.")
+                index_label.setFixedWidth(40)
+                index_label.setStyleSheet("color: #666666; font-size: 14px; font-weight: bold;")
+                row_layout.addWidget(index_label)
+                
+                # 输入框
+                edit = QLineEdit(file_info['file_name'])
+                edit.selectAll()  # 自动选中所有文本
+                row_layout.addWidget(edit)
+                self.line_edits.append((file_info['file_id'], edit, file_info['file_name']))
+                
+                scroll_layout.addLayout(row_layout)
+            
+            scroll_area.setWidget(scroll_content)
+            layout.addWidget(scroll_area)
             
             # 按钮布局
             btn_layout = QHBoxLayout()
@@ -323,14 +495,22 @@ class FileListPage(QWidget):
             btn_layout.addStretch()
             layout.addLayout(btn_layout)
             
-            # 设置回车键确认
-            self.name_edit.returnPressed.connect(self.accept)
-            # 设置焦点到输入框
-            self.name_edit.setFocus()
+            # 设置焦点到第一个输入框
+            if self.line_edits:
+                self.line_edits[0][1].setFocus()
         
-        def get_new_name(self):
-            return self.name_edit.text().strip()
-    
+        def get_rename_list(self):
+            """获取重命名列表"""
+            result = []
+            for file_id, edit, old_name in self.line_edits:
+                new_name = edit.text().strip()
+                if new_name and new_name != old_name:
+                    result.append({
+                        'file_id': file_id,
+                        'old_name': old_name,
+                        'new_name': new_name
+                    })
+            return result
 
     
     def __init__(self, get_token_func, parent=None):
@@ -713,7 +893,11 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             self.info_label.setToolTip("")
             self.info_label.setVisible(True)
             return
-        parent_id = parent_id if parent_id is not None else self.current_parent_id
+        # 如果parent_id为None，表示根目录（ID为0）
+        if parent_id is None:
+            parent_id = 0
+        else:
+            parent_id = parent_id if parent_id is not None else self.current_parent_id
         # 优先用缓存
         if search_data is None and parent_id in self.file_list_cache:
             self.file_list = self.file_list_cache[parent_id].copy()
@@ -891,6 +1075,16 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     def hide_info_label(self):
         """隐藏信息标签"""
         self.info_label.setVisible(False)
+
+    def clear_cache(self):
+        """清除当前目录的缓存"""
+        if self.current_parent_id in self.file_list_cache:
+            del self.file_list_cache[self.current_parent_id]
+    
+    def clear_file_list(self):
+        """清除文件列表显示"""
+        self.table.setRowCount(0)
+        self.current_parent_id = None
 
     def refresh_table(self):
         """刷新表格显示"""
@@ -1076,6 +1270,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 resp = self.api.create_directory(token, dir_name.strip(), parent_id)
                 if resp:
                     QMessageBox.information(self, "成功", f"目录 '{dir_name}' 创建成功！")
+                    self.clear_cache()  # 清除缓存
                     self.load_file_list()
                 else:
                     QMessageBox.warning(self, "失败", "目录创建失败")
@@ -1099,7 +1294,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             old_name = f.get('filename', '')
             
             # 使用自定义重命名对话框
-            rename_dlg = self.RenameDialog(old_name, self)
+            rename_dlg = self.RenameDialog([{'file_id': file_id, 'file_name': old_name}], self)
             if rename_dlg.exec_() == QDialog.Accepted:
                 new_name = rename_dlg.get_new_name()
                 if new_name and new_name != old_name:
@@ -1110,6 +1305,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                     try:
                         self.api.rename_file(token, file_id, new_name)
                         QMessageBox.information(self, "成功", f"重命名成功！")
+                        self.clear_cache()  # 清除缓存
                         self.load_file_list()
                     except Exception as e:
                         QMessageBox.critical(self, "错误", f"重命名失败: {e}")
@@ -1121,6 +1317,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             class BatchRenameDialog(QDialog):
                 def __init__(self, file_infos, parent=None):
                     super().__init__(parent)
+                    self.file_infos = file_infos  # 存储文件信息列表
                     self.setWindowTitle("批量重命名")
                     self.resize(480, 480)
                     layout = QVBoxLayout(self)
@@ -1207,6 +1404,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             try:
                 self.api.move_to_trash(token, file_ids)
                 QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
+                self.clear_cache()  # 清除缓存
                 self.load_file_list()
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {e}") 
@@ -1245,6 +1443,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 try:
                     self.api.move_files(token, file_ids, to_parent_id)
                     QMessageBox.information(self, "成功", f"移动成功！")
+                    self.clear_cache()  # 清除缓存
                     self.load_file_list()
                 except Exception as e:
                     QMessageBox.critical(self, "错误", f"移动失败: {e}") 
@@ -1414,32 +1613,81 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             # 重命名功能（文件和文件夹都支持）
             rename_action = QAction('重命名', self.table)
             def do_rename():
-                f = self.get_file_by_row(selected_rows[0])
-                if not f:
-                    QMessageBox.warning(self, "提示", "未找到对应文件")
-                    return
-                file_id = f.get('fileId')
-                old_name = f.get('filename', '')
-                
-                # 使用自定义重命名对话框
-                rename_dlg = self.RenameDialog(old_name, self)
-                if rename_dlg.exec_() == QDialog.Accepted:
-                    new_name = rename_dlg.get_new_name()
-                    if new_name and new_name != old_name:
-                        token = self.get_token_func()
-                        if not token:
-                            QMessageBox.warning(self, "提示", "请先登录/选择用户")
-                            return
-                        try:
-                            self.api.rename_file(token, file_id, new_name)
-                            QMessageBox.information(self, "成功", f"重命名成功！")
-                            self.load_file_list()
-                        except Exception as e:
-                            QMessageBox.critical(self, "错误", f"重命名失败: {e}")
+                if len(selected_rows) == 1:
+                    # 单选：执行重命名
+                    f = self.get_file_by_row(selected_rows[0])
+                    if not f:
+                        QMessageBox.warning(self, "提示", "未找到对应文件")
+                        return
+                    
+                    file_id = f.get('fileId')
+                    old_name = f.get('filename', '')
+                    
+                    # 使用自定义重命名对话框
+                    rename_dlg = self.RenameDialog([{'file_id': file_id, 'file_name': old_name}], self)
+                    if rename_dlg.exec_() == QDialog.Accepted:
+                        new_name = rename_dlg.get_new_name()
+                        if new_name and new_name != old_name:
+                            token = self.get_token_func()
+                            if not token:
+                                QMessageBox.warning(self, "提示", "请先登录/选择用户")
+                                return
+                            try:
+                                self.api.rename_file(token, file_id, new_name)
+                                QMessageBox.information(self, "成功", f"重命名成功！")
+                                self.clear_cache()  # 清除缓存
+                                self.load_file_list()
+                            except Exception as e:
+                                QMessageBox.critical(self, "错误", f"重命名失败: {e}")
+                else:
+                    # 多选：显示多文件重命名对话框
+                    file_infos = []
+                    for row_idx in selected_rows:
+                        f = self.get_file_by_row(row_idx)
+                        if f:
+                            file_infos.append({
+                                'file_id': f.get('fileId'),
+                                'file_name': f.get('filename', '')
+                            })
+                    
+                    if not file_infos:
+                        QMessageBox.warning(self, "提示", "未找到有效的文件信息")
+                        return
+                    
+                    # 使用自定义多文件重命名对话框
+                    rename_dlg = self.MultiRenameDialog(file_infos, self)
+                    if rename_dlg.exec_() == QDialog.Accepted:
+                        rename_list = rename_dlg.get_rename_list()
+                        if rename_list:
+                            token = self.get_token_func()
+                            if not token:
+                                QMessageBox.warning(self, "提示", "请先登录/选择用户")
+                                return
+                            
+                            from core.file_api import FileApi
+                            api = FileApi()
+                            progress_dlg = ProgressDialog("重命名进度", len(rename_list), self)
+                            worker = BatchRenameWorker(api, token, rename_list, batch_size=5)
+                            
+                            def on_progress(done, total):
+                                progress_dlg.setValue(done)
+                            
+                            def on_finished(success, fail):
+                                progress_dlg.setValue(len(rename_list))
+                                progress_dlg.setLabelText(f"完成，成功{success}个，失败{fail}个。")
+                                QApplication.processEvents()
+                                QTimer.singleShot(1500, progress_dlg.close)
+                                self.clear_cache()  # 清除缓存
+                                self.load_file_list()
+                            
+                            worker.progress.connect(on_progress)
+                            worker.finished.connect(on_finished)
+                            worker.start()
+                            progress_dlg.exec_()
             rename_action.triggered.connect(do_rename)
             menu.addAction(rename_action)
             
-            # 批量重命名功能（只在多选文件时显示）
+            # 批量重命名功能（只在多选且全部为文件时显示）
             if len(selected_rows) > 1:
                 # 检查是否都是文件（type=0表示文件，type=1表示文件夹）
                 all_files = True
@@ -1489,6 +1737,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                                     progress_dlg.setLabelText(f"完成，成功{success}个，失败{fail}个。")
                                     QApplication.processEvents()
                                     QTimer.singleShot(1500, progress_dlg.close)
+                                    self.clear_cache()  # 清除缓存
                                     self.load_file_list()
                                 
                                 worker.progress.connect(on_progress)
@@ -1527,6 +1776,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                     try:
                         self.api.move_to_trash(token, file_ids)
                         QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
+                        self.clear_cache()  # 清除缓存
                         self.load_file_list()
                     except Exception as e:
                         QMessageBox.critical(self, "错误", f"删除失败: {e}")
@@ -1561,6 +1811,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                         try:
                             self.api.move_files(token, file_ids, to_parent_id)
                             QMessageBox.information(self, "成功", f"移动成功！")
+                            self.clear_cache()  # 清除缓存
                             self.load_file_list()
                         except Exception as e:
                             QMessageBox.critical(self, "错误", f"移动失败: {e}")
@@ -1646,16 +1897,38 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         if not selected_rows:
             QMessageBox.warning(self, "提示", "请先选择要批量重命名的文件/文件夹")
             return
+        
+        # 检查选择数量 - 批量重命名用于2个及以上的文件
+        if len(selected_rows) < 2:
+            QMessageBox.information(self, "提示", "批量重命名功能需要选择2个及以上的文件。")
+            return
+        
         file_infos = []
         for idx in selected_rows:
             row = idx.row()
-            file_id = self.table.item(row, 0).text()
-            file_name = self.table.item(row, 1).text()
-            file_infos.append({'file_id': file_id, 'file_name': file_name})
+            f = self.get_file_by_row(row)
+            if f:
+                file_infos.append({
+                    'file_id': f.get('fileId'),
+                    'file_name': f.get('filename', '')
+                })
+        
+        if not file_infos:
+            QMessageBox.warning(self, "提示", "未找到有效的文件信息")
+            return
+        
         dlg = BatchRenameDialog(file_infos, self)
         if dlg.exec_() == dlg.Accepted:
             rename_list = dlg.get_rename_list()
+            if not rename_list:
+                QMessageBox.information(self, "提示", "没有需要重命名的文件")
+                return
+            
             token = self.get_token_func()
+            if not token:
+                QMessageBox.warning(self, "提示", "请先登录/选择用户")
+                return
+            
             api = FileApi()
             progress_dlg = ProgressDialog("批量重命名进度", len(rename_list), self)
             worker = BatchRenameWorker(api, token, rename_list, batch_size=5)  # 并发数改为5
@@ -1669,6 +1942,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 time.sleep(1.2)
                 progress_dlg.accept()
                 QMessageBox.information(self, "批量重命名", f"重命名完成，成功{success}个，失败{fail}个。")
+                self.clear_cache()  # 清除缓存
                 self.on_refresh()
             worker.progress.connect(on_progress)
             worker.finished.connect(on_finished)
@@ -1811,6 +2085,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             try:
                 self.api.move_to_trash(token, harmony_file_ids)
                 QMessageBox.information(self, "成功", f"删除成功，已移入回收站！")
+                self.clear_cache()  # 清除缓存
                 self.load_file_list()
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"删除失败: {e}")

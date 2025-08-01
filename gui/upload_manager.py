@@ -167,4 +167,8 @@ class UploadManager:
         pass
 
     def cancel_upload(self, task):
-        pass 
+        pass
+    
+    def clear_tasks(self):
+        """清除所有上传任务"""
+        self.tasks = [] 

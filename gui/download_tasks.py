@@ -9,11 +9,15 @@ from PyQt5.QtCore import Qt, QTimer
 # 移除全局TASKS_FILE，改为按用户名动态生成
 
 def get_download_tasks_file(username):
+    if username is None:
+        return os.path.join(os.path.expanduser('~'), '.oprnapidown_default_download_tasks.json')
     # 简单处理非法文件名字符
     safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in username)
     return os.path.join(os.path.expanduser('~'), f'.oprnapidown_{safe_name}_download_tasks.json')
 
 def get_download_path_file(username):
+    if username is None:
+        return os.path.join(os.path.expanduser('~'), '.oprnapidown_default_path.txt')
     safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in username)
     return os.path.join(os.path.expanduser('~'), f'.oprnapidown_{safe_name}_path.txt')
 
@@ -366,6 +370,8 @@ QProgressBar::chunk {
             self.refresh_table()
 
 def get_offline_tasks_file(username):
+    if username is None:
+        return os.path.join(os.path.expanduser('~'), '.oprnapidown_default_offline_tasks.json')
     safe_name = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in username)
     return os.path.join(os.path.expanduser('~'), f'.oprnapidown_{safe_name}_offline_tasks.json')
 

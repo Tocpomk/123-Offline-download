@@ -237,6 +237,10 @@ class MainWindow(QMainWindow):
         self.user_table.setColumnWidth(2, 450)  # Token（宽）
         self.user_table.setColumnWidth(3, 80)   # 创建时间（窄）
         self.user_table.itemSelectionChanged.connect(self.check_token_expired_highlight)
+        
+        # 如果当前有登录用户，更新样式
+        if self.current_user:
+            self.update_user_table_logged_in_style()
     
     def on_user_table_context_menu(self, pos):
         """用户表格右击菜单"""
@@ -344,7 +348,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.1.2")
+        self.setWindowTitle("123网盘离线下载工具1.1.3")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -451,6 +455,10 @@ class MainWindow(QMainWindow):
         self.offline_task_manager = OfflineTaskManager()
         self.progress_query_thread = None  # 进度查询线程
         self.init_ui()
+        
+        # 延迟检查记忆登录，确保界面完全加载后再执行
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(500, self.check_auto_login)
 
     def init_ui(self):
         self.splitter = QSplitter(Qt.Horizontal)
@@ -475,6 +483,101 @@ class MainWindow(QMainWindow):
         user_layout = QVBoxLayout()
         user_layout.setContentsMargins(8, 8, 8, 8)  # 缩小边距
         user_layout.setSpacing(6)
+        
+        # 顶部按钮区域
+        top_btn_layout = QHBoxLayout()
+        top_btn_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        
+        # 添加用户按钮（左边）
+        from PyQt5.QtWidgets import QToolButton, QMenu
+        self.add_user_btn = QToolButton()
+        self.add_user_btn.setText("添加用户")
+        self.add_user_btn.setFixedSize(110, 44)
+        self.add_user_btn.setStyleSheet("""
+            QToolButton {
+                font-weight: bold;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6DD5FA, stop:1 #2980B9);
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 18px;
+                padding: 4px 8px;
+            }
+            QToolButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2980B9, stop:1 #6DD5FA);
+            }
+        """)
+        self.add_user_btn.clicked.connect(self.add_user_dialog)
+        top_btn_layout.addWidget(self.add_user_btn)
+        
+        top_btn_layout.addSpacing(8)
+        
+        # 导入用户按钮（带下拉菜单）
+        from PyQt5.QtWidgets import QToolButton, QMenu
+        self.import_user_btn = QToolButton()
+        self.import_user_btn.setText("导入用户")
+        self.import_user_btn.setFixedSize(110, 44)
+        self.import_user_btn.setStyleSheet("""
+            QToolButton {
+                font-weight: bold;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6DD5FA, stop:1 #2980B9);
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 18px;
+                padding: 4px 8px;
+                padding-right: 18px;
+            }
+            QToolButton::menu-indicator {
+                subcontrol-origin: padding;
+                subcontrol-position: right center;
+                right: 8px;
+                width: 16px;
+                height: 16px;
+            }
+            QToolButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2980B9, stop:1 #6DD5FA);
+            }
+        """)
+        
+        # 创建下拉菜单
+        import_menu = QMenu()
+        import_menu.setStyleSheet("""
+            QMenu {
+                background: #ffffff;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                padding: 4px 0px;
+                font-size: 12px;
+            }
+            QMenu::item {
+                padding: 8px 16px;
+                border-radius: 4px;
+                margin: 2px 4px;
+            }
+            QMenu::item:selected {
+                background: #e6f7ff;
+                color: #165DFF;
+            }
+        """)
+        
+        # 导出用户选项
+        export_action = import_menu.addAction("导出用户")
+        export_action.triggered.connect(self.export_users)
+        
+        self.import_user_btn.setMenu(import_menu)
+        self.import_user_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        # 连接按钮点击事件到导入用户功能
+        self.import_user_btn.clicked.connect(self.import_users)
+        top_btn_layout.addWidget(self.import_user_btn)
+        
+        top_btn_layout.addStretch()
+        top_btn_layout.setContentsMargins(0, 0, 0, 0)
+        top_btn_layout.setSpacing(8)
+        
+        user_layout.addLayout(top_btn_layout)
+        
+        # 用户表格
         self.user_table = QTableWidget()
         self.user_table.setColumnCount(4)
         self.user_table.setHorizontalHeaderLabels(["用户名", "Client", "Token", "创建时间"])
@@ -490,44 +593,45 @@ class MainWindow(QMainWindow):
         self.user_table.customContextMenuRequested.connect(self.on_user_table_context_menu)
         self.refresh_user_table()
         user_layout.addWidget(self.user_table)
-        # 先创建按钮
-        self.add_user_btn = QPushButton("添加用户")
-        self.add_user_btn.setMinimumWidth(140)
-        self.add_user_btn.setMinimumHeight(44)
-        self.add_user_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #165DFF,stop:1 #0FC6C2);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0E4FE1,stop:1 #0FC6C2);}")
-        self.add_user_btn.clicked.connect(self.add_user_dialog)
-        self.confirm_btn = QPushButton("确认登录")
-        self.confirm_btn.setMinimumWidth(140)
-        self.confirm_btn.setMinimumHeight(44)
-        self.confirm_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
-        self.confirm_btn.clicked.connect(self.confirm_use)
-        # 底部按钮居中+导入导出
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self.import_user_btn = QPushButton("导入用户")
-        self.import_user_btn.setMinimumWidth(120)
-        self.import_user_btn.setMinimumHeight(44)
-        self.import_user_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6DD5FA,stop:1 #2980B9);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2980B9,stop:1 #6DD5FA);}")
-        self.import_user_btn.clicked.connect(self.import_users)
-        btn_layout.addWidget(self.import_user_btn)
-        btn_layout.addSpacing(18)
-        self.export_user_btn = QPushButton("导出用户")
-        self.export_user_btn.setMinimumWidth(120)
-        self.export_user_btn.setMinimumHeight(44)
-        self.export_user_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #F7971E,stop:1 #FFD200);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FFD200,stop:1 #F7971E);}")
-        self.export_user_btn.clicked.connect(self.export_users)
-        btn_layout.addWidget(self.export_user_btn)
-        btn_layout.addSpacing(30)
-        btn_layout.addWidget(self.add_user_btn)
-        btn_layout.addSpacing(30)
-        btn_layout.addWidget(self.confirm_btn)
-        btn_layout.addStretch()
-        btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(12)
-        btn_widget = QWidget()
-        btn_widget.setLayout(btn_layout)
-        btn_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        user_layout.addWidget(btn_widget)
+        
+        # 底部按钮区域
+        bottom_btn_layout = QHBoxLayout()
+        bottom_btn_layout.addStretch()
+        
+        # 登录按钮
+        self.login_btn = QPushButton("登录")
+        self.login_btn.setMinimumWidth(140)
+        self.login_btn.setMinimumHeight(44)
+        self.login_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #13C2C2,stop:1 #165DFF);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #08979C,stop:1 #0E4FE1);}")
+        self.login_btn.clicked.connect(self.confirm_use)
+        bottom_btn_layout.addWidget(self.login_btn)
+        
+        bottom_btn_layout.addSpacing(15)
+        
+        # 记忆登录按钮
+        self.remember_login_btn = QPushButton("记忆登录")
+        self.remember_login_btn.setMinimumWidth(140)
+        self.remember_login_btn.setMinimumHeight(44)
+        self.remember_login_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #52C41A,stop:1 #389E0D);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #389E0D,stop:1 #237804);}")
+        self.remember_login_btn.clicked.connect(self.remember_login)
+        bottom_btn_layout.addWidget(self.remember_login_btn)
+        
+        bottom_btn_layout.addSpacing(15)
+        
+        # 退出按钮
+        self.logout_btn = QPushButton("退出")
+        self.logout_btn.setMinimumWidth(140)
+        self.logout_btn.setMinimumHeight(44)
+        self.logout_btn.setStyleSheet("QPushButton{font-weight:bold;background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF7875,stop:1 #FF4D4F);color:#fff;border:none;border-radius:10px;font-size:18px;} QPushButton:hover{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #FF4D4F,stop:1 #D9363E);}")
+        self.logout_btn.clicked.connect(self.logout_user)
+        self.logout_btn.setEnabled(False)  # 初始状态禁用
+        bottom_btn_layout.addWidget(self.logout_btn)
+        
+        bottom_btn_layout.addStretch()
+        bottom_btn_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_btn_layout.setSpacing(12)
+        
+        user_layout.addLayout(bottom_btn_layout)
         user_tab.setLayout(user_layout)
         self.stack.addWidget(user_tab)
 
@@ -828,37 +932,7 @@ QProgressBar::chunk {
         self.setCentralWidget(main_widget)
 
         # 表格美化：减小圆角，增加间隔，显示网格线
-        self.user_table.setStyleSheet("""
-            QTableWidget {
-                border-radius: 6px;
-                border: 1.2px solid #d0d7de;
-                background: #fff;
-                font-size: 16px;
-                gridline-color: #e0e0e0;
-            }
-            QTableWidget::item {
-                border-radius: 4px;
-                padding: 8px 6px;
-                margin: 2px;
-            }
-            QTableWidget::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e6f7ff, stop:1 #cce7ff);
-                color: #165DFF;
-                border: 1.2px solid #165DFF;
-            }
-            QTableWidget::item:hover {
-                background: #f0faff;
-            }
-            QHeaderView::section {
-                background: #A3C8F7;
-                color: #222;
-                font-weight: bold;
-                font-size: 17px;
-                border: none;
-                height: 40px;
-                border-radius: 6px;
-            }
-        """)
+        self.update_user_table_logged_out_style()
         self.user_table.setShowGrid(True)
         # 设置行高
         self.user_table.verticalHeader().setDefaultSectionSize(108)  # 36 * 3
@@ -1240,10 +1314,220 @@ QProgressBar::chunk {
         self.current_user = name
         self.offline_task_manager.set_user(name)
         self.download_task_manager.set_user(name)
+        
+        # 更新按钮状态
+        self.login_btn.setEnabled(False)
+        self.logout_btn.setEnabled(True)
+        
+        # 更新用户列表样式（登录状态）
+        self.update_user_table_logged_in_style()
+        
+        # 重置文件列表页面的当前目录ID
+        if hasattr(self, 'file_list_page'):
+            self.file_list_page.current_parent_id = '0'
+        
         QMessageBox.information(self, "成功", f"已确认使用用户 {name}")
         # 切换用户后，更新下载路径显示
         if hasattr(self, 'download_task_widget'):
             self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
+        
+        # 注意：普通登录不会影响记忆登录配置
+
+    def remember_login(self):
+        """记忆登录功能"""
+        row = self.user_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "提示", "请先选择要记忆登录的用户")
+            return
+        
+        name = self.user_table.item(row, 0).text()
+        user = self.user_manager.get_user(name)
+        if not user:
+            QMessageBox.warning(self, "提示", "用户不存在")
+            return
+        
+        # 检查Token是否有效
+        client_id = user.get('client_id', '')
+        client_secret = user.get('client_secret', '')
+        if client_id and client_secret:
+            if self.user_manager.is_token_expired(name):
+                try:
+                    token, expired_at = self.api.get_token_by_credentials(user['client_id'], user['client_secret'])
+                    self.user_manager.update_token(name, token, expired_at)
+                except Exception as e:
+                    QMessageBox.critical(self, "错误", f"Token刷新失败: {e}")
+                    return
+        else:
+            # token用户，尝试用token访问接口，失败才提示token过期
+            try:
+                # 以获取用户文件列表为token有效性校验
+                from core.file_api import FileApi
+                api = FileApi()
+                token = user.get('access_token', '')
+                resp = api.get_file_list(token, parent_file_id=0, limit=1)
+                if resp.get('code') != 0:
+                    raise Exception(resp.get('message', 'Token无效'))
+            except Exception:
+                QMessageBox.warning(self, "提示", "请手动更新Token，token过期无法记忆登录")
+                return
+        
+        # 保存记忆登录配置
+        self.user_manager.save_remember_login_config(True, name)
+        
+        # 执行登录
+        self.current_user = name
+        self.offline_task_manager.set_user(name)
+        self.download_task_manager.set_user(name)
+        
+        # 更新按钮状态
+        self.login_btn.setEnabled(False)
+        self.logout_btn.setEnabled(True)
+        
+        # 更新用户列表样式（登录状态）
+        self.update_user_table_logged_in_style()
+        
+        # 重置文件列表页面的当前目录ID
+        if hasattr(self, 'file_list_page'):
+            self.file_list_page.current_parent_id = '0'
+        
+        QMessageBox.information(self, "成功", f"已记忆登录用户 {name}，下次启动将自动登录")
+        # 切换用户后，更新下载路径显示
+        if hasattr(self, 'download_task_widget'):
+            self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
+
+    def logout_user(self):
+        """退出用户登录状态"""
+        if not self.current_user:
+            return
+        
+        # 清除记忆登录配置
+        self.user_manager.save_remember_login_config(False)
+        
+        self.current_user = None
+        self.offline_task_manager.set_user(None)
+        self.download_task_manager.set_user(None)
+        
+        # 更新按钮状态
+        self.login_btn.setEnabled(True)
+        self.logout_btn.setEnabled(False)
+        
+        # 恢复用户列表样式（未登录状态）
+        self.update_user_table_logged_out_style()
+        
+        # 清除表格选择
+        self.user_table.clearSelection()
+        
+        # 清除文件列表
+        if hasattr(self, 'file_list_page'):
+            self.file_list_page.clear_cache()
+            self.file_list_page.clear_file_list()
+        
+        # 清除回收站数据
+        if hasattr(self, 'recycle_bin_page'):
+            self.recycle_bin_page.clear_data()
+        
+        # 清除下载任务数据
+        if hasattr(self, 'download_task_manager'):
+            self.download_task_manager.clear_tasks()
+        
+        # 清除上传任务数据
+        if hasattr(self, 'upload_manager'):
+            self.upload_manager.clear_tasks()
+        
+        QMessageBox.information(self, "成功", "已退出登录状态")
+
+    def update_user_table_logged_in_style(self):
+        """更新用户表格为登录状态样式"""
+        self.user_table.setStyleSheet("""
+            QTableWidget {
+                border-radius: 6px;
+                border: 1.2px solid #d0d7de;
+                background: #ffffff;
+                font-size: 16px;
+                gridline-color: #e0e0e0;
+                alternate-background-color: #e6f7ff;
+            }
+            QTableWidget::item {
+                border-radius: 4px;
+                padding: 8px 6px;
+                margin: 2px;
+                background: #e6f7ff;
+            }
+            QTableWidget::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e6f7ff, stop:1 #cce7ff);
+                color: #165DFF;
+                border: 1.2px solid #165DFF;
+            }
+            QTableWidget::item:hover {
+                background: #f0faff;
+            }
+            QHeaderView::section {
+                background: #A3C8F7;
+                color: #222;
+                font-weight: bold;
+                font-size: 17px;
+                border: none;
+                height: 40px;
+                border-radius: 6px;
+            }
+        """)
+        
+        # 高亮当前登录用户的用户名列
+        if self.current_user:
+            for row in range(self.user_table.rowCount()):
+                username_item = self.user_table.item(row, 0)
+                if username_item and username_item.text() == self.current_user:
+                    username_item.setBackground(Qt.green)
+                    username_item.setForeground(Qt.black)  # 保持黑色字体
+                    font = username_item.font()
+                    font.setBold(True)
+                    username_item.setFont(font)
+                    break
+
+    def update_user_table_logged_out_style(self):
+        """恢复用户表格为未登录状态样式"""
+        self.user_table.setStyleSheet("""
+            QTableWidget {
+                border-radius: 6px;
+                border: 1.2px solid #d0d7de;
+                background: #ffffff;
+                font-size: 16px;
+                gridline-color: #e0e0e0;
+            }
+            QTableWidget::item {
+                border-radius: 4px;
+                padding: 8px 6px;
+                margin: 2px;
+                background: #ffffff;
+            }
+            QTableWidget::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e6f7ff, stop:1 #cce7ff);
+                color: #165DFF;
+                border: 1.2px solid #165DFF;
+            }
+            QTableWidget::item:hover {
+                background: #f0faff;
+            }
+            QHeaderView::section {
+                background: #A3C8F7;
+                color: #222;
+                font-weight: bold;
+                font-size: 17px;
+                border: none;
+                height: 40px;
+                border-radius: 6px;
+            }
+        """)
+        
+        # 清除所有用户名列的高亮
+        for row in range(self.user_table.rowCount()):
+            username_item = self.user_table.item(row, 0)
+            if username_item:
+                username_item.setBackground(Qt.transparent)
+                username_item.setForeground(Qt.black)
+                font = username_item.font()
+                font.setBold(False)
+                username_item.setFont(font)
 
     def import_users(self):
         from .user_io import import_users_dialog
@@ -1307,6 +1591,26 @@ QProgressBar::chunk {
         
         super().closeEvent(event)
 
+    def check_auto_login(self):
+        """检查并执行自动登录"""
+        # 确保用户表格已经加载
+        if self.user_table.rowCount() == 0:
+            # 如果表格还没加载，延迟100ms后重试
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self.check_auto_login)
+            return
+        
+        last_user = self.user_manager.get_last_login_user()
+        if last_user:
+            # 找到对应的用户行
+            for row in range(self.user_table.rowCount()):
+                if self.user_table.item(row, 0).text() == last_user:
+                    # 选中该用户
+                    self.user_table.selectRow(row)
+                    # 执行记忆登录
+                    self.remember_login()
+                    break
+    
     def get_token_func(self):
         if self.current_user:
             user = self.user_manager.get_user(self.current_user)

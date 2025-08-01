@@ -260,14 +260,18 @@ class RecycleBinPage(QWidget):
 
         # 信息标签（移动到表格下方）
         self.info_label = QLabel()
+        self.info_label.setWordWrap(False)  # 禁用自动换行，保持一行显示
+        self.info_label.setMaximumHeight(40)  # 限制最大高度
+        self.info_label.setMinimumWidth(400)  # 设置最小宽度，确保有足够空间显示
         self.info_label.setStyleSheet("""
             QLabel {
                 color: #165DFF;
                 font-size: 14px;
-                padding: 8px;
+                padding: 8px 12px;
                 background: #e6f7ff;
                 border-radius: 6px;
                 border: 1px solid #91d5ff;
+                max-width: none;
             }
         """)
         self.info_label.setVisible(False)
@@ -324,7 +328,26 @@ class RecycleBinPage(QWidget):
     
     def on_auto_load_error(self, error_msg):
         """自动加载出错"""
-        self.info_label.setText(f"获取失败：{error_msg}")
+        # 简化错误信息，确保在一行内显示
+        if "HTTPSConnectionPool" in error_msg:
+            simplified_error = "网络连接失败，请检查网络连接后重试"
+        elif "Max retries exceeded" in error_msg:
+            simplified_error = "请求超时，请稍后重试"
+        elif "API错误" in error_msg:
+            # 截断API错误信息
+            api_msg = error_msg.replace("API错误: ", "")
+            if len(api_msg) > 40:
+                simplified_error = f"API错误: {api_msg[:40]}..."
+            else:
+                simplified_error = error_msg
+        else:
+            # 截断过长的错误信息
+            if len(error_msg) > 60:
+                simplified_error = error_msg[:60] + "..."
+            else:
+                simplified_error = error_msg
+        
+        self.info_label.setText(f"获取失败：{simplified_error}")
         self.info_label.setVisible(True)
         
         # 清理工作线程
@@ -494,7 +517,11 @@ class RecycleBinPage(QWidget):
             QMessageBox.information(self, "成功", f"已成功恢复{len(file_ids)}个文件")
             self.load_recycle_bin()  # 重新加载列表
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"恢复文件失败：{str(e)}")
+            # 简化错误信息
+            error_msg = str(e)
+            if len(error_msg) > 100:
+                error_msg = error_msg[:100] + "..."
+            QMessageBox.critical(self, "错误", f"恢复文件失败：{error_msg}")
     
     def delete_files(self, file_ids):
         """永久删除文件"""
@@ -513,7 +540,11 @@ class RecycleBinPage(QWidget):
             QMessageBox.information(self, "成功", f"已成功删除{len(file_ids)}个文件")
             self.load_recycle_bin()  # 重新加载列表
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"删除文件失败：{str(e)}")
+            # 简化错误信息
+            error_msg = str(e)
+            if len(error_msg) > 100:
+                error_msg = error_msg[:100] + "..."
+            QMessageBox.critical(self, "错误", f"删除文件失败：{error_msg}")
     
     def closeEvent(self, event):
         """关闭事件"""
@@ -524,4 +555,19 @@ class RecycleBinPage(QWidget):
         # 停止定时器
         if self.info_hide_timer.isActive():
             self.info_hide_timer.stop()
-        super().closeEvent(event) 
+        super().closeEvent(event)
+    
+    def clear_data(self):
+        """清除数据（用户退出时调用）"""
+        # 停止工作线程
+        if self.auto_load_worker and self.auto_load_worker.isRunning():
+            self.auto_load_worker.stop()
+            self.auto_load_worker.wait()
+        # 停止定时器
+        if self.info_hide_timer.isActive():
+            self.info_hide_timer.stop()
+        # 清除数据
+        self.file_list = []
+        self.total = 0
+        self.table.setRowCount(0)
+        self.info_label.setVisible(False) 
