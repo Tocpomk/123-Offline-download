@@ -1,8 +1,0 @@
-{
-  "muse": {
-    "client_id": "27e2bb9a4cdc4a2d83e6ec0af2dbd447",
-    "client_secret": "2bebcf765c89461585013d515b52ebf8",
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTMzNDEzMjEsImlhdCI6MTc1MjczNjUyMSwiaWQiOjE4MTkwMTM4NzAsIm1haWwiOiIiLCJuaWNrbmFtZSI6IuaaruiJsk1VIiwidXNlcm5hbWUiOjE3NzQzMjA5NTQ5LCJ2IjowfQ.OxoODYuO3nefvjONZTz93LyFJ9nAc4xhnA0XCR1XKjs",
-    "expired_at": "2025-08-16T15:15:21+08:00"
-  }
-}

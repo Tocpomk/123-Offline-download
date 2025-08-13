@@ -134,3 +134,8 @@ class UserManager:
             if config['last_user'] in self.users:
                 return config['last_user']
         return None
+    
+    def is_remember_login_user(self, username):
+        """检查指定用户是否为记忆登录用户"""
+        config = self.get_remember_login_config()
+        return config.get('enabled') and config.get('last_user') == username

@@ -328,6 +328,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     en_ep_match = re.search(r'(S\d{1,2}E\d{1,3})', name, re.I)
                     en_episode = en_ep_match.group(0) if en_ep_match else None
                     
+                    # 提取EPxx格式的集数
+                    ep_match = re.search(r'(EP?\d{1,3})', name, re.I)
+                    ep_episode = ep_match.group(0) if ep_match else None
+                    
                     # 提取中文集数(第x集)
                     ch_ep_match = re.search(r'(第[零一二三四五六七八九十百千万\d]+[集话話])', name)
                     ch_episode = ch_ep_match.group(0) if ch_ep_match else None
@@ -338,13 +342,20 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                         num_match = re.search(r'E(\d{1,3})', en_episode, re.I)
                         if num_match:
                             episode_num = int(num_match.group(1))
+                    # 如果只有EPxx格式，提取集号
+                    elif ep_episode and not en_episode:
+                        num_match = re.search(r'(\d{1,3})', ep_episode)
+                        if num_match:
+                            episode_num = int(num_match.group(1))
                     
                     return {
                         'en_episode': en_episode,
+                        'ep_episode': ep_episode,
                         'ch_episode': ch_episode,
                         'episode_num': episode_num,
                         'ch_match': ch_ep_match,
-                        'en_match': en_ep_match
+                        'en_match': en_ep_match,
+                        'ep_match': ep_match
                     }
                 
                 # 分析所有文件结构
@@ -358,6 +369,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     matches = []
                     if ep_info['en_match']:
                         matches.append(ep_info['en_match'])
+                    if ep_info['ep_match']:
+                        matches.append(ep_info['ep_match'])
                     if ep_info['ch_match']:
                         matches.append(ep_info['ch_match'])
                     
@@ -385,6 +398,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                         # 添加占位符
                         if 'S' in match.group(0):
                             parts.append("{en_episode}")
+                        elif 'P' in match.group(0) and not 'S' in match.group(0):
+                            parts.append("{ep_episode}")
                         else:
                             parts.append("{ch_episode}")
                         
@@ -425,9 +440,24 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     else:
                         ep_info = templ_info['ep_info']
                         
-                        # 保持原有的集数
+                        # 保持原有的集数，但统一格式
                         en_episode = ep_info['en_episode']
+                        ep_episode = ep_info['ep_episode']
                         ch_episode = ep_info['ch_episode']
+                        
+                        # 如果已有英文集数，统一格式为S*E***
+                        if en_episode:
+                            # 提取季数和集数
+                            season_match = re.search(r'S(\d{1,2})', en_episode, re.I)
+                            episode_match = re.search(r'E(\d{1,3})', en_episode, re.I)
+                            if season_match and episode_match:
+                                season_num = season_match.group(1).zfill(2)  # 确保季数是2位
+                                episode_num = int(episode_match.group(1))
+                                en_episode = f"S{season_num}E{episode_num:03d}"  # 确保集数是3位
+                        
+                        # 如果只有EPxx格式，转换为S01Exxx格式
+                        if ep_episode and not en_episode and ep_info['episode_num']:
+                            en_episode = f"S01E{ep_info['episode_num']:03d}"
                         
                         # 如果缺少英文集数但有数字
                         if not en_episode and ep_info['episode_num']:
@@ -439,7 +469,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                                     if season_match:
                                         season_num = season_match.group(1)
                                         break
-                            en_episode = f"S{season_num}E{ep_info['episode_num']:02d}"
+                            en_episode = f"S{season_num}E{ep_info['episode_num']:03d}"
                         
                         # 如果缺少中文集数但有数字
                         if not ch_episode and ep_info['episode_num']:
@@ -450,6 +480,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                         # 确保替换值不为None
                         if "{en_episode}" in new_name:
                             new_name = new_name.replace("{en_episode}", en_episode or "")
+                        if "{ep_episode}" in new_name:
+                            new_name = new_name.replace("{ep_episode}", en_episode or "")
                         if "{ch_episode}" in new_name:
                             new_name = new_name.replace("{ch_episode}", ch_episode or "")
                         
@@ -486,6 +518,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 en_ep_match = re.search(r'(S\d{1,2}E\d{1,3})', name, re.I)
                 en_episode = en_ep_match.group(0) if en_ep_match else None
                 
+                # 提取EPxx格式的集数
+                ep_match = re.search(r'(EP?\d{1,3})', name, re.I)
+                ep_episode = ep_match.group(0) if ep_match else None
+                
                 # 提取中文集数(第x集)
                 ch_ep_match = re.search(r'(第[零一二三四五六七八九十百千万\d]+[集话話])', name)
                 ch_episode = ch_ep_match.group(0) if ch_ep_match else None
@@ -496,13 +532,20 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     num_match = re.search(r'E(\d{1,3})', en_episode, re.I)
                     if num_match:
                         episode_num = int(num_match.group(1))
+                # 如果只有EPxx格式，提取集号
+                elif ep_episode and not en_episode:
+                    num_match = re.search(r'(\d{1,3})', ep_episode)
+                    if num_match:
+                        episode_num = int(num_match.group(1))
                 
                 return {
                     'en_episode': en_episode,
+                    'ep_episode': ep_episode,
                     'ch_episode': ch_episode,
                     'episode_num': episode_num,
                     'ch_match': ch_ep_match,
-                    'en_match': en_ep_match
+                    'en_match': en_ep_match,
+                    'ep_match': ep_match
                 }
             
             # 分析所有文件结构
@@ -516,6 +559,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 matches = []
                 if ep_info['en_match']:
                     matches.append(ep_info['en_match'])
+                if ep_info['ep_match']:
+                    matches.append(ep_info['ep_match'])
                 if ep_info['ch_match']:
                     matches.append(ep_info['ch_match'])
                 
@@ -543,6 +588,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     # 添加占位符
                     if 'S' in match.group(0):
                         parts.append("{en_episode}")
+                    elif 'P' in match.group(0) and not 'S' in match.group(0):
+                        parts.append("{ep_episode}")
                     else:
                         parts.append("{ch_episode}")
                     
@@ -575,9 +622,24 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 else:
                     ep_info = templ_info['ep_info']
                     
-                    # 保持原有的集数
+                    # 保持原有的集数，但统一格式
                     en_episode = ep_info['en_episode']
+                    ep_episode = ep_info['ep_episode']
                     ch_episode = ep_info['ch_episode']
+                    
+                    # 如果已有英文集数，统一格式为S*E***
+                    if en_episode:
+                        # 提取季数和集数
+                        season_match = re.search(r'S(\d{1,2})', en_episode, re.I)
+                        episode_match = re.search(r'E(\d{1,3})', en_episode, re.I)
+                        if season_match and episode_match:
+                            season_num = season_match.group(1).zfill(2)  # 确保季数是2位
+                            episode_num = int(episode_match.group(1))
+                            en_episode = f"S{season_num}E{episode_num:03d}"  # 确保集数是3位
+                    
+                    # 如果只有EPxx格式，转换为S01Exxx格式
+                    if ep_episode and not en_episode and ep_info['episode_num']:
+                        en_episode = f"S01E{ep_info['episode_num']:03d}"
                     
                     # 如果缺少英文集数但有数字
                     if not en_episode and ep_info['episode_num']:
@@ -589,7 +651,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                                 if season_match:
                                     season_num = season_match.group(1)
                                     break
-                        en_episode = f"S{season_num}E{ep_info['episode_num']:02d}"
+                        en_episode = f"S{season_num}E{ep_info['episode_num']:03d}"
                     
                     # 如果缺少中文集数但有数字
                     if not ch_episode and ep_info['episode_num']:
@@ -600,6 +662,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                     # 确保替换值不为None
                     if "{en_episode}" in new_name:
                         new_name = new_name.replace("{en_episode}", en_episode or "")
+                    if "{ep_episode}" in new_name:
+                        new_name = new_name.replace("{ep_episode}", en_episode or "")
                     if "{ch_episode}" in new_name:
                         new_name = new_name.replace("{ch_episode}", ch_episode or "")
                     

@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from core.api import Pan123Api
 from core.storage import TokenStorage
 from core.user import UserManager
-from gui.file_list import FileListPage
+from gui.file_list_new import FileListPage
 from gui.recycle_bin import RecycleBinPage
 from gui.download_tasks import DownloadTaskWidget, DownloadTaskManager, OfflineTaskManager
 from gui.folder_select_dialog import FolderSelectDialog
@@ -232,6 +232,16 @@ class MainWindow(QMainWindow):
             created_at = info.get('created_at', '')
             created_item = QTableWidgetItem(created_at)
             self.user_table.setItem(row, 3, created_item)
+            
+            # 为记忆登录用户设置红色底色
+            if self.user_manager.is_remember_login_user(name):
+                username_item = self.user_table.item(row, 0)
+                username_item.setBackground(Qt.red)
+                username_item.setForeground(Qt.white)
+                font = username_item.font()
+                font.setBold(True)
+                username_item.setFont(font)
+                
         self.user_table.setColumnWidth(0, 100)  # 用户名（窄）
         self.user_table.setColumnWidth(1, 450)  # Client（宽）
         self.user_table.setColumnWidth(2, 450)  # Token（宽）
@@ -241,6 +251,9 @@ class MainWindow(QMainWindow):
         # 如果当前有登录用户，更新样式
         if self.current_user:
             self.update_user_table_logged_in_style()
+        else:
+            # 如果没有登录用户，确保记忆登录用户显示红色底色
+            self.update_remember_login_highlight()
     
     def on_user_table_context_menu(self, pos):
         """用户表格右击菜单"""
@@ -348,7 +361,7 @@ class MainWindow(QMainWindow):
                 self.user_table.clearSelection()
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("123网盘离线下载工具1.1.3")
+        self.setWindowTitle("123网盘离线下载工具1.1.4")
         self.resize(1400, 900)
         # 设置窗口图标，兼容打包和源码
         try:
@@ -1371,6 +1384,9 @@ QProgressBar::chunk {
                 QMessageBox.warning(self, "提示", "请手动更新Token，token过期无法记忆登录")
                 return
         
+        # 检查是否为首次设置记忆登录
+        is_first_time = not self.user_manager.is_remember_login_user(name)
+        
         # 保存记忆登录配置
         self.user_manager.save_remember_login_config(True, name)
         
@@ -1390,7 +1406,10 @@ QProgressBar::chunk {
         if hasattr(self, 'file_list_page'):
             self.file_list_page.current_parent_id = '0'
         
-        QMessageBox.information(self, "成功", f"已记忆登录用户 {name}，下次启动将自动登录")
+        # 只在首次设置记忆登录时显示提示
+        if is_first_time:
+            QMessageBox.information(self, "成功", f"已记忆登录用户 {name}，下次启动将自动登录")
+        
         # 切换用户后，更新下载路径显示
         if hasattr(self, 'download_task_widget'):
             self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
@@ -1472,17 +1491,45 @@ QProgressBar::chunk {
             }
         """)
         
-        # 高亮当前登录用户的用户名列
+        # 高亮当前登录用户的用户名列，但保持记忆登录用户的红色底色
         if self.current_user:
             for row in range(self.user_table.rowCount()):
                 username_item = self.user_table.item(row, 0)
                 if username_item and username_item.text() == self.current_user:
-                    username_item.setBackground(Qt.green)
-                    username_item.setForeground(Qt.black)  # 保持黑色字体
+                    # 如果是记忆登录用户，保持红色底色
+                    if self.user_manager.is_remember_login_user(self.current_user):
+                        username_item.setBackground(Qt.red)
+                        username_item.setForeground(Qt.white)
+                    else:
+                        username_item.setBackground(Qt.green)
+                        username_item.setForeground(Qt.black)
                     font = username_item.font()
                     font.setBold(True)
                     username_item.setFont(font)
                     break
+        else:
+            # 如果没有当前登录用户，确保记忆登录用户显示红色底色
+            self.update_remember_login_highlight()
+
+    def update_remember_login_highlight(self):
+        """更新记忆登录用户的高亮显示"""
+        for row in range(self.user_table.rowCount()):
+            username_item = self.user_table.item(row, 0)
+            if username_item:
+                name = username_item.text()
+                # 如果是记忆登录用户，设置红色底色
+                if self.user_manager.is_remember_login_user(name):
+                    username_item.setBackground(Qt.red)
+                    username_item.setForeground(Qt.white)
+                    font = username_item.font()
+                    font.setBold(True)
+                    username_item.setFont(font)
+                else:
+                    username_item.setBackground(Qt.transparent)
+                    username_item.setForeground(Qt.black)
+                    font = username_item.font()
+                    font.setBold(False)
+                    username_item.setFont(font)
 
     def update_user_table_logged_out_style(self):
         """恢复用户表格为未登录状态样式"""
@@ -1519,15 +1566,24 @@ QProgressBar::chunk {
             }
         """)
         
-        # 清除所有用户名列的高亮
+        # 清除所有用户名列的高亮，但保持记忆登录用户的红色底色
         for row in range(self.user_table.rowCount()):
             username_item = self.user_table.item(row, 0)
             if username_item:
-                username_item.setBackground(Qt.transparent)
-                username_item.setForeground(Qt.black)
-                font = username_item.font()
-                font.setBold(False)
-                username_item.setFont(font)
+                name = username_item.text()
+                # 如果是记忆登录用户，保持红色底色
+                if self.user_manager.is_remember_login_user(name):
+                    username_item.setBackground(Qt.red)
+                    username_item.setForeground(Qt.white)
+                    font = username_item.font()
+                    font.setBold(True)
+                    username_item.setFont(font)
+                else:
+                    username_item.setBackground(Qt.transparent)
+                    username_item.setForeground(Qt.black)
+                    font = username_item.font()
+                    font.setBold(False)
+                    username_item.setFont(font)
 
     def import_users(self):
         from .user_io import import_users_dialog
@@ -1607,9 +1663,60 @@ QProgressBar::chunk {
                 if self.user_table.item(row, 0).text() == last_user:
                     # 选中该用户
                     self.user_table.selectRow(row)
-                    # 执行记忆登录
-                    self.remember_login()
+                    # 执行自动登录（不显示提示）
+                    self.auto_login_without_prompt(last_user)
                     break
+    
+    def auto_login_without_prompt(self, name):
+        """自动登录（不显示提示）"""
+        user = self.user_manager.get_user(name)
+        if not user:
+            return
+        
+        # 检查Token是否有效
+        client_id = user.get('client_id', '')
+        client_secret = user.get('client_secret', '')
+        if client_id and client_secret:
+            if self.user_manager.is_token_expired(name):
+                try:
+                    token, expired_at = self.api.get_token_by_credentials(user['client_id'], user['client_secret'])
+                    self.user_manager.update_token(name, token, expired_at)
+                except Exception as e:
+                    # 自动登录失败时不显示错误，静默处理
+                    return
+        else:
+            # token用户，尝试用token访问接口，失败才提示token过期
+            try:
+                # 以获取用户文件列表为token有效性校验
+                from core.file_api import FileApi
+                api = FileApi()
+                token = user.get('access_token', '')
+                resp = api.get_file_list(token, parent_file_id=0, limit=1)
+                if resp.get('code') != 0:
+                    raise Exception(resp.get('message', 'Token无效'))
+            except Exception:
+                # 自动登录失败时不显示错误，静默处理
+                return
+        
+        # 执行登录
+        self.current_user = name
+        self.offline_task_manager.set_user(name)
+        self.download_task_manager.set_user(name)
+        
+        # 更新按钮状态
+        self.login_btn.setEnabled(False)
+        self.logout_btn.setEnabled(True)
+        
+        # 更新用户列表样式（登录状态）
+        self.update_user_table_logged_in_style()
+        
+        # 重置文件列表页面的当前目录ID
+        if hasattr(self, 'file_list_page'):
+            self.file_list_page.current_parent_id = '0'
+        
+        # 切换用户后，更新下载路径显示
+        if hasattr(self, 'download_task_widget'):
+            self.download_task_widget.path_label.setText(f"下载路径: {self.download_task_manager.get_download_path() or '未设置'}")
     
     def get_token_func(self):
         if self.current_user:
