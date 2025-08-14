@@ -35,19 +35,8 @@ python main.py
 <img width="1820" height="945" alt="image" src="https://github.com/user-attachments/assets/6c1d26f7-0942-43c3-a4b2-27f320745f32" />
 然后点击登录，之后就会更新，复制红款圈中的就是token，填入添加即可
 <img width="1066" height="688" alt="image" src="https://github.com/user-attachments/assets/bfabb55d-2eb0-4613-a007-6652004fee89" />
-
-## 目录结构
-
-```
-openapidown/
-├── main.py                  # 程序入口
-├── config/                  # 配置相关
-├── core/                    # 核心逻辑（API、存储、用户等）
-├── gui/                     # 前端界面（主窗口、弹窗、控件等）
-├── resources/               # 资源文件
-├── icon_date.ico            # 程序图标
-├── requirements.txt         # 依赖包列表（如有）
-```
+- 账号密码登录
+输入账号密码然后获取token即可
 
 ## 常见问题
 
@@ -59,3 +48,4 @@ openapidown/
 请检查 Python 版本和依赖包是否安装齐全。
 ## 贡献与反馈
 如有建议、Bug反馈或功能需求，欢迎提 Issue 或 PR！ 
+
